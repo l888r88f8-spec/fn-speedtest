@@ -1,5 +1,5 @@
 appname=fnos-speedtest
-version=1.10.3
+version=1.10.4
 display_name=牛速
 desc=为飞牛 NAS 设计的多源公网测速工具。接入 Speedtest.cn，并根据公网 IP、运营商和省份清晰分组、智能匹配节点。
 source=thirdparty
