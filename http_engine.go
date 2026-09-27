@@ -539,9 +539,33 @@ func runHTTPTest(ctx context.Context, client *http.Client, target httpTarget, p 
 		defer closeGlobalSession(client, target)
 	}
 	progress("latency", 31, "正在检测所选节点延迟")
-	latency, jitter, err := checkHTTPTarget(ctx, client, target, sample)
-	if err != nil {
-		return testResult{}, networkError("所选 HTTP 节点当前不可用，请刷新节点", err)
+	var latency, jitter float64
+	var err error
+	if target.Protocol == "speedtestcn" {
+		// Match ecsspeed-cn: latency is advisory. A broken /hello endpoint must
+		// not prevent the real download/upload endpoints from being measured.
+		latencyCtx, latencyCancel := context.WithTimeout(ctx, 8*time.Second)
+		latency, jitter, _ = speedtestCNLatency(latencyCtx, client, target, sample)
+		latencyCancel()
+		if latency <= 0 {
+			tcpCtx, tcpCancel := context.WithTimeout(ctx, 4*time.Second)
+			if tcpLatency, tcpErr := speedtestCNTCPLatency(tcpCtx, target); tcpErr == nil {
+				latency = tcpLatency
+				jitter = 0
+				if sample != nil && ctx.Err() == nil {
+					sample(liveSample{LatencyMS: &latency})
+				}
+			}
+			tcpCancel()
+		}
+		if err = ctx.Err(); err != nil {
+			return testResult{}, err
+		}
+	} else {
+		latency, jitter, err = checkHTTPTarget(ctx, client, target, sample)
+		if err != nil {
+			return testResult{}, networkError("所选 HTTP 节点当前不可用，请刷新节点", err)
+		}
 	}
 	progress("download", 45, "正在测量下载速度")
 	down, err := measureHTTPPhase(ctx, client, target, httpConfig(p, false), sample)
