@@ -1,0 +1,15 @@
+{
+  ".url": {
+    "fnos-speedtest.Application": {
+      "title": "牛速",
+      "desc": "Speedtest.cn / Speedtest.net 智能选点测速",
+      "icon": "images/icon_{0}.png",
+      "type": "iframe",
+      "protocol": "",
+      "gatewayPrefix": "/app/fnos-speedtest",
+      "gatewaySocket": "speedtest.sock",
+      "url": "/app/fnos-speedtest/",
+      "allUsers": false
+    }
+  }
+}

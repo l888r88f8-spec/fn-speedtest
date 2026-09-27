@@ -1,0 +1,55 @@
+#!/bin/bash
+
+LOG_FILE="${TRIM_PKGVAR}/speedtest.log"
+PID_FILE="${TRIM_PKGVAR}/speedtest.pid"
+SOCKET_FILE="${TRIM_APPDEST}/speedtest.sock"
+BIN_FILE="${TRIM_APPDEST}/bin/fnos-speedtest"
+
+is_running() {
+  [ -f "$PID_FILE" ] || return 1
+  local pid
+  pid="$(head -n 1 "$PID_FILE" | tr -d '[:space:]')"
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
+start_app() {
+  if is_running; then
+    return 0
+  fi
+  rm -f "$PID_FILE" "$SOCKET_FILE"
+  mkdir -p "$TRIM_PKGVAR"
+  "$BIN_FILE" --socket "$SOCKET_FILE" --data-dir "$TRIM_PKGVAR" >> "$LOG_FILE" 2>&1 &
+  echo "$!" > "$PID_FILE"
+  sleep 1
+  if ! is_running; then
+    echo "牛速启动失败，请查看 ${LOG_FILE}" > "$TRIM_TEMP_LOGFILE"
+    rm -f "$PID_FILE" "$SOCKET_FILE"
+    return 1
+  fi
+}
+
+stop_app() {
+  if ! is_running; then
+    rm -f "$PID_FILE" "$SOCKET_FILE"
+    return 0
+  fi
+  local pid count
+  pid="$(head -n 1 "$PID_FILE" | tr -d '[:space:]')"
+  kill -TERM "$pid" 2>/dev/null || true
+  count=0
+  while kill -0 "$pid" 2>/dev/null && [ "$count" -lt 10 ]; do
+    sleep 1
+    count=$((count + 1))
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -KILL "$pid" 2>/dev/null || true
+  fi
+  rm -f "$PID_FILE" "$SOCKET_FILE"
+}
+
+case "$1" in
+  start) start_app ;;
+  stop) stop_app ;;
+  status) if is_running; then exit 0; else exit 3; fi ;;
+  *) echo "未知操作：$1" > "$TRIM_TEMP_LOGFILE"; exit 1 ;;
+esac

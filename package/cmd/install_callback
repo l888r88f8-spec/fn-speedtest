@@ -1,0 +1,3 @@
+#!/bin/bash
+chmod +x "${TRIM_APPDEST}/bin/fnos-speedtest"
+exit 0

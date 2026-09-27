@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>牛速 · NAS 网络测速</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">N</span><div><h1>牛速</h1><p>NAS 网络质量检测</p></div></div>
+      <div class="engine"><span class="dot"></span>多源智能选点</div>
+    </header>
+
+    <section class="hero card">
+      <div class="controls">
+        <div class="profile-control">
+          <label for="profile">测速模式</label>
+          <select id="profile">
+            <option value="quick">快速 · 省流量</option>
+            <option value="standard" selected>标准 · 推荐</option>
+            <option value="deep">深度 · 高并发</option>
+          </select>
+        </div>
+        <div class="server-control">
+          <div class="control-label"><label for="serverSelect">测速节点</label><button id="refreshServersButton" class="refresh-nodes" type="button">刷新节点</button></div>
+          <select id="serverSelect">
+            <option value="">正在自动匹配最佳节点…</option>
+          </select>
+          <p id="sourceHint" class="source-hint hidden" role="status"></p>
+        </div>
+        <button id="startButton" class="start" type="button"><span id="actionLabel">开始测速</span><b id="actionIcon" aria-hidden="true">→</b></button>
+      </div>
+      <p id="actionError" class="action-error hidden" role="alert"></p>
+      <div id="progressWrap" class="progress-wrap hidden">
+        <div class="progress"><i id="progressBar"></i></div>
+        <div class="progress-meta"><span id="phaseText">准备中</span><span id="progressText">0%</span></div>
+      </div>
+    </section>
+
+    <section class="metrics">
+      <article class="metric card download">
+        <div class="metric-icon">↓</div><div class="metric-label">下载速度</div>
+        <div><strong id="downloadValue">—</strong><span>Mbps</span></div>
+        <div class="metric-meter"><i id="downloadProgressBar"></i></div>
+        <small id="downloadProgressText">等待下载测试</small>
+      </article>
+      <article class="metric card upload">
+        <div class="metric-icon">↑</div><div class="metric-label">上传速度</div>
+        <div><strong id="uploadValue">—</strong><span>Mbps</span></div>
+        <div class="metric-meter"><i id="uploadProgressBar"></i></div>
+        <small id="uploadProgressText">等待上传测试</small>
+      </article>
+      <article class="metric card latency">
+        <div class="metric-icon">⌁</div><div class="metric-label">空闲延迟</div>
+        <div><strong id="latencyValue">—</strong><span>ms</span></div>
+        <small id="jitterValue">抖动 — ms</small>
+      </article>
+    </section>
+
+    <section class="details card">
+      <div><span>测速节点</span><b id="serverValue">自动匹配</b></div>
+      <div><span>节点运营方</span><b id="sponsorValue">测速后显示</b></div>
+      <div><span>网络归属</span><b id="ispValue">正在识别运营商</b><small id="regionValue">正在识别省份</small></div>
+      <div><span>公网 IP</span><b id="ipValue">测速后显示</b></div>
+    </section>
+
+    <section class="history card">
+      <div class="section-head"><div><h3>最近记录</h3><p>最多保存 50 条测速结果</p></div><button id="clearButton" class="text-button">清空记录</button></div>
+      <div class="table-wrap">
+        <table><thead><tr><th>时间</th><th class="node-col">测速节点</th><th>下载</th><th>上传</th><th>延迟</th><th>模式</th></tr></thead><tbody id="historyBody"></tbody></table>
+        <div id="emptyHistory" class="empty">还没有测速记录，点击“开始测速”生成第一条记录。</div>
+      </div>
+    </section>
+
+    <footer>牛速 v<span id="version">1.10.3</span> · 测速会消耗公网流量，请避开流量计费网络</footer>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
