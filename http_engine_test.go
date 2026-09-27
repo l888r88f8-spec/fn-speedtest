@@ -255,6 +255,7 @@ func TestMultiSourceDiscoveryFallback(t *testing.T) {
 	server, target, _ := mockHTTPSource(t)
 	m := newMultiEngine()
 	m.globalDirectory = nil
+	m.cnDirectory = nil
 	m.client = server.Client()
 	m.sources = []httpSource{target.Source, {ID: "http:broken", Kind: "university", Page: server.URL + "/unavailable"}}
 	m.detect = func(context.Context) (*speedtest.User, networkIdentity) {
