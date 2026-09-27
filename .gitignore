@@ -1,0 +1,6 @@
+dist/
+package/app/bin/
+go.local.mod
+go.local.sum
+dev-data/
+*.log
