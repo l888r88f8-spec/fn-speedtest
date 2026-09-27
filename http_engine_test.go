@@ -86,6 +86,47 @@ func TestHTTPProbeAndComplete(t *testing.T) {
 		t.Fatal("expired target accepted")
 	}
 }
+func TestSpeedtestCNRunContinuesWhenLatencyUnavailable(t *testing.T) {
+	var uploaded atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/download":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = w.Write(make([]byte, 1<<20))
+		case "/upload":
+			n, _ := io.Copy(io.Discard, r.Body)
+			uploaded.Add(n)
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	target := httpTarget{
+		Protocol:    "speedtestcn",
+		PingURL:     "http://127.0.0.1:1/hello",
+		DownloadURL: server.URL + "/download",
+		UploadURL:   server.URL + "/upload",
+		Source: httpSource{
+			ID: "http:cn:test", Name: "测试节点", Sponsor: "中国电信",
+			Province: "江苏", Carrier: "中国电信", Kind: "speedtestcn",
+		},
+		Network: networkIdentity{PublicIP: "114.114.114.114", Carrier: "中国电信", Province: "江苏", CountryCode: "CN"},
+	}
+
+	result, err := runHTTPTest(context.Background(), server.Client(), target, profiles["quick"], func(string, int, string) {}, func(liveSample) {})
+	if err != nil {
+		t.Fatalf("Speedtest.cn should continue after latency failure: %v", err)
+	}
+	if result.DownloadMbps <= 0 || result.UploadMbps <= 0 || uploaded.Load() == 0 {
+		t.Fatalf("unexpected result=%+v uploaded=%d", result, uploaded.Load())
+	}
+	if result.LatencyMS != 0 {
+		t.Fatalf("failed latency probe should stay unknown/zero, got %v", result.LatencyMS)
+	}
+}
+
 func TestHTTPPhaseCancellation(t *testing.T) {
 	for _, upload := range []bool{false, true} {
 		t.Run(map[bool]string{false: "download", true: "upload"}[upload], func(t *testing.T) {
