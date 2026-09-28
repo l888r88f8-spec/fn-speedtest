@@ -27,7 +27,7 @@ class Element {
  let state={status:'idle'},starts=0,catalogs=0,chosen='',releaseStart,releaseState,releaseCancel,holdState=false;
  const fetch=async (url,options={})=> {
   const endpoint=url.slice(4);let data={};
-  if(endpoint==='info') data={version:'1.10.15'};
+  if(endpoint==='info') data={version:'1.10.16'};
   if(endpoint==='history') data=null; // Empty history must still render without map errors.
   if(endpoint==='servers') {catalogs++;data={publicIp:'114.114.114.114',network:{publicIp:'114.114.114.114',carrier:'中国电信',countryCode:'CN',province:'江苏'},recommendedId:'http:cn:1',sources:[{id:'speedtestcn',status:'available'}],servers:[
    {id:'http:cn:1',name:'南京',province:'江苏',country:'中国',sponsor:'中国电信',carrier:'中国电信',kind:'speedtestcn',engine:'Speedtest.cn',mainland:true,provinceMatched:true,carrierMatched:true,latencyMeasured:true,healthStatus:'success',latencyMs:8,jitterMs:.3,recommended:true},
@@ -38,7 +38,8 @@ class Element {
    {id:'cn2',name:'北京',country:'中国',sponsor:'中国电信',kind:'speedtest',engine:'Speedtest.net',mainland:true,latencyMs:16,jitterMs:.6},
    {id:'http:edu',name:'高校',sponsor:'大学',kind:'university',mainland:true,latencyMs:12},
    {id:'http:isp',name:'运营商',sponsor:'电信',kind:'operator',mainland:true,latencyMs:11},
-   {id:'near',name:'Tokyo',country:'Japan',sponsor:'ISP',kind:'speedtest',engine:'Speedtest.net',mainland:false,latencyMs:90,jitterMs:2}
+   {id:'near',name:'Tokyo',country:'Japan',sponsor:'ISP',kind:'speedtest',engine:'Speedtest.net',mainland:false,latencyMs:90,jitterMs:2},
+   {id:'http:net:vkit:nanjing-ct',name:'南京',province:'江苏',country:'中国',sponsor:'江苏电信',carrier:'中国电信',kind:'speedtest',engine:'Speedtest.net',mainland:true,latencyMs:7}
   ]};}
   if(endpoint==='servers' && catalogueMode==='recommended') {data.recommendedId='http:cn:1'; data.servers=data.servers.filter(s=>s.id==='http:cn:1');data.servers[0].recommended=true;data.sources=[{id:'speedtestcn',status:'available'}];}
   if(endpoint==='servers' && ['failed','empty'].includes(catalogueMode)) {
@@ -68,7 +69,7 @@ class Element {
  assert.equal(elements.regionValue.textContent,'江苏 · IP 归属地');
  assert.ok(elements.cnServerSelect);assert.ok(elements.netServerSelect);
  assert.equal(elements.cnServerSelect.children.length,7);
- assert.equal(elements.netServerSelect.children.length,4);
+ assert.equal(elements.netServerSelect.children.length,5);
  assert.equal(elements.cnServerSelect.children[0].value,'');
  assert.equal(elements.cnServerSelect.children[1].value,'http:cn:1');
  assert.equal(elements.cnServerSelect.children[2].value,'http:cn:2');
@@ -77,7 +78,7 @@ class Element {
  assert.ok(elements.cnServerSelect.children[1].textContent.includes('可用'));
  assert.equal(elements.cnServerSelect.children[1].textContent.includes('★'),false);
  assert.equal(elements.cnServerSelect.children[1].textContent.includes('｜'),false);
- assert.equal(elements.netServerCount.textContent,'3 个');
+ assert.equal(elements.netServerCount.textContent,'4 个');
  elements.cnServerSelect.value='http:cn:2';
  await elements.cnServerSelect.events.change();
  const starting=elements.startButton.click();

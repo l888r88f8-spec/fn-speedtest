@@ -86,9 +86,12 @@ func (m *multiEngine) Run(ctx context.Context, p profile, id string, progress pr
 		if !ok || time.Now().After(cached.expires) {
 			return testResult{}, errors.New("节点信息已过期，请刷新节点后重试")
 		}
-		if cached.target.Protocol == "speedtestcn" {
+		switch cached.target.Protocol {
+		case "speedtestcn":
 			result, err = runSpeedtestCNHybrid(ctx, m.client, cached.target, p, progress, sample)
-		} else {
+		case "speedtestnet":
+			result, err = runSpeedtestCNCustom(ctx, cached.target, p, progress, sample)
+		default:
 			result, err = runHTTPTest(ctx, m.client, cached.target, p, progress, sample)
 		}
 	}
@@ -116,6 +119,12 @@ func (m *multiEngine) Discover(ctx context.Context) (serverListResponse, error) 
 		cctx, cancel := context.WithTimeout(ctx, 7*time.Second)
 		defer cancel()
 		cnResults <- m.discoverSpeedtestCN(cctx, n)
+	}()
+	supplementalNet := make(chan []serverOption, 1)
+	go func() {
+		cctx, cancel := context.WithTimeout(ctx, 6*time.Second)
+		defer cancel()
+		supplementalNet <- m.discoverSupplementalNet(cctx, n)
 	}()
 	options := make(chan serverOption, len(m.sources))
 	var wg sync.WaitGroup
@@ -166,11 +175,29 @@ func (m *multiEngine) Discover(ctx context.Context) (serverListResponse, error) 
 		list.Servers[i].Engine = "Speedtest.net"
 		list.Servers[i].Kind = "speedtest"
 	}
+	seenServerIDs := map[string]bool{}
+	for _, option := range list.Servers {
+		seenServerIDs[option.ID] = true
+	}
 	for option := range options {
-		list.Servers = append(list.Servers, option)
+		if !seenServerIDs[option.ID] {
+			list.Servers = append(list.Servers, option)
+			seenServerIDs[option.ID] = true
+		}
+	}
+	for _, option := range <-supplementalNet {
+		if !seenServerIDs[option.ID] {
+			list.Servers = append(list.Servers, option)
+			seenServerIDs[option.ID] = true
+		}
 	}
 	cn := <-cnResults
-	list.Servers = append(list.Servers, cn.Servers...)
+	for _, option := range cn.Servers {
+		if !seenServerIDs[option.ID] {
+			list.Servers = append(list.Servers, option)
+			seenServerIDs[option.ID] = true
+		}
+	}
 	list.Sources = []sourceDiagnostic{cn.Diagnostic}
 	for i := range list.Servers {
 		m.applyHealth(&list.Servers[i])

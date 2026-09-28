@@ -193,7 +193,7 @@ func runSpeedtestCNCustomLibrary(ctx context.Context, target httpTarget, p profi
 		}
 	})
 
-	progress("connecting", 18, "正在连接 Speedtest.cn 实时测速节点")
+	progress("connecting", 18, "正在连接实时测速节点")
 	server, err := client.CustomServer(target.CustomURL)
 	if err != nil {
 		return testResult{}, fmt.Errorf("实时引擎节点初始化失败：%w", err)
@@ -244,6 +244,10 @@ func runSpeedtestCNCustomLibrary(ctx context.Context, target httpTarget, p profi
 }
 
 func speedtestCNResult(target httpTarget, latency, jitter, download, upload float64) testResult {
+	engine := "Speedtest.cn"
+	if target.Protocol == "speedtestnet" {
+		engine = "Speedtest.net"
+	}
 	location := target.Source.Name
 	if target.Source.Province != "" {
 		location = target.Source.Province + " · " + location
@@ -251,7 +255,7 @@ func speedtestCNResult(target httpTarget, latency, jitter, download, upload floa
 	isp := target.Network.ISP
 	if isp == "" { isp = target.Network.Carrier }
 	return testResult{
-		Engine: "Speedtest.cn", Network: &target.Network,
+		Engine: engine, Network: &target.Network,
 		LatencyMS: round2(latency), JitterMS: round2(jitter),
 		DownloadMbps: round2(download), UploadMbps: round2(upload),
 		ServerLocation: location, ServerID: target.Source.ID,
