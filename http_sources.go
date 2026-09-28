@@ -174,9 +174,20 @@ func (m *multiEngine) forget(id string) { m.mu.Lock(); delete(m.targets, id); m.
 func rankServerOptions(list *serverListResponse) {
 	score := func(s serverOption) float64 {
 		if s.Kind == "speedtestcn" && !s.LatencyMeasured {
-			// Keep advisory-probe failures selectable, like ecsspeed, but do
-			// not recommend them ahead of nodes with a measured latency.
-			return 1e9
+			// A successful first-byte /download probe is stronger evidence than
+			// TCP/region metadata. Prefer those nodes while keeping unverified
+			// catalog entries selectable as fallbacks.
+			v := 1e6
+			if s.BandwidthReady {
+				v = 30
+			}
+			if s.CarrierMatched {
+				v *= .82
+			}
+			if s.ProvinceMatched {
+				v *= .9
+			}
+			return v
 		}
 		v := s.LatencyMS + .5*s.JitterMS
 		if s.CarrierMatched {
