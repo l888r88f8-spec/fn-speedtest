@@ -1,6 +1,6 @@
 const $ = (id) => document.getElementById(id);
 const els = {
-  sourceHint: $('sourceHint'), start: $('startButton'), actionLabel: $('actionLabel'), actionIcon: $('actionIcon'), profile: $('profile'), serverSelect: $('serverSelect'), refreshServers: $('refreshServersButton'), progressWrap: $('progressWrap'),
+  sourceHint: $('sourceHint'), start: $('startButton'), actionLabel: $('actionLabel'), actionIcon: $('actionIcon'), profile: $('profile'), cnServerSelect: $('cnServerSelect'), netServerSelect: $('netServerSelect'), cnServerCount: $('cnServerCount'), netServerCount: $('netServerCount'), refreshServers: $('refreshServersButton'), progressWrap: $('progressWrap'),
   progressBar: $('progressBar'), progressText: $('progressText'), phase: $('phaseText'), error: $('actionError'),
   down: $('downloadValue'), up: $('uploadValue'), latency: $('latencyValue'), jitter: $('jitterValue'),
   downProgress: $('downloadProgressBar'), upProgress: $('uploadProgressBar'), downProgressText: $('downloadProgressText'), upProgressText: $('uploadProgressText'),
@@ -18,6 +18,7 @@ let testStatus = 'idle';
 let actionPending = '';
 let stateEpoch = 0;
 let refreshing = false;
+let selectedServerID = '';
 
 async function api(path, options = {}) {
   const response = await fetch(`api/${path}`, {headers: {'Content-Type': 'application/json'}, ...options});
@@ -56,7 +57,8 @@ function renderControls() {
   els.start.classList.toggle('is-cancel', running || stopping);
   els.start.disabled = stopping || starting || (!running && !serversReady);
   els.profile.disabled = testRunning;
-  els.serverSelect.disabled = testRunning || !serversReady;
+  els.cnServerSelect.disabled = testRunning || !serversReady;
+  els.netServerSelect.disabled = testRunning || !serversReady;
   els.refreshServers.disabled = testRunning || serversLoading;
   els.progressWrap.classList.toggle('hidden', !running);
   document.querySelectorAll('.metric strong').forEach(el => el.classList.toggle('pulse', running));
@@ -117,8 +119,25 @@ function sortServersForDisplay(servers) {
   });
 }
 
+function serverColumn(server) {
+  return server.kind === 'speedtest' || server.engine === 'Speedtest.net' ? 'net' : 'cn';
+}
+
+function chooseServer(id, column) {
+  if (!id || !nearbyServers.some(server => server.id === id)) return;
+  selectedServerID = id;
+  if (column === 'cn') {
+    els.cnServerSelect.value = id;
+    els.netServerSelect.selectedIndex = -1;
+  } else {
+    els.netServerSelect.value = id;
+    els.cnServerSelect.selectedIndex = -1;
+  }
+  updateSelectedServerDetails();
+}
+
 function updateSelectedServerDetails() {
-  const selected = nearbyServers.find(server => server.id === els.serverSelect.value);
+  const selected = nearbyServers.find(server => server.id === selectedServerID);
   const recommended = nearbyServers.find(server => server.recommended);
   const server = selected || recommended;
   if (!server) return;
@@ -141,33 +160,56 @@ async function loadServers() {
   serversLoading = true;
   showError();
   showSourceStatus([]);
-  const previous = els.serverSelect.value;
+  const previous = selectedServerID;
   serversReady = false;
   els.start.disabled = true;
   els.refreshServers.disabled = true;
-  els.serverSelect.disabled = true;
-  els.serverSelect.replaceChildren(new Option('正在自动匹配附近节点…', ''));
+  els.cnServerSelect.disabled = true;
+  els.netServerSelect.disabled = true;
+  els.cnServerSelect.replaceChildren(new Option('正在加载 CN 节点…', ''));
+  els.netServerSelect.replaceChildren(new Option('正在加载 Speedtest.net 节点…', ''));
+  els.cnServerCount.textContent = '…';
+  els.netServerCount.textContent = '…';
   try {
     const data = await api('servers');
     showSourceStatus(data.sources);
-    nearbyServers = sortServersForDisplay(Array.isArray(data.servers) ? data.servers : []);
-    const recommended = nearbyServers.find(server => server.id === data.recommendedId) || nearbyServers.find(server => server.recommended) || nearbyServers[0];
+    nearbyServers = Array.isArray(data.servers) ? data.servers : [];
+    const cnServers = sortServersForDisplay(nearbyServers.filter(server => serverColumn(server) === 'cn'));
+    const netServers = sortServersForDisplay(nearbyServers.filter(server => serverColumn(server) === 'net'));
+    const recommended = nearbyServers.find(server => server.id === data.recommendedId) || nearbyServers.find(server => server.recommended) || cnServers[0] || netServers[0];
     if (!recommended) throw new Error('没有找到可用的测速节点');
-    const options = nearbyServers.map(server => new Option(
+
+    const makeOptions = servers => servers.map(server => new Option(
       `${server.id === recommended.id ? '★ ' : ''}${serverLabel(server)}`,
       server.id
     ));
-    els.serverSelect.replaceChildren(...options);
-    if (previous && nearbyServers.some(server => server.id === previous)) els.serverSelect.value = previous;
-    else els.serverSelect.value = recommended.id;
-    serversReady = true;
+    els.cnServerSelect.replaceChildren(...(cnServers.length ? makeOptions(cnServers) : [new Option('暂无 CN 节点', '')]));
+    els.netServerSelect.replaceChildren(...(netServers.length ? makeOptions(netServers) : [new Option('暂无 Speedtest.net 节点', '')]));
+    els.cnServerCount.textContent = `${cnServers.length} 个`;
+    els.netServerCount.textContent = `${netServers.length} 个`;
+
+    const preferred = previous && nearbyServers.some(server => server.id === previous) ? previous : recommended.id;
+    const preferredServer = nearbyServers.find(server => server.id === preferred);
+    selectedServerID = preferred;
+    if (preferredServer && serverColumn(preferredServer) === 'net') {
+      els.netServerSelect.value = preferred;
+      els.cnServerSelect.selectedIndex = -1;
+    } else {
+      els.cnServerSelect.value = preferred;
+      els.netServerSelect.selectedIndex = -1;
+    }
+    serversReady = Boolean(selectedServerID);
     currentNetwork = data.network || null;
     showNetwork(currentNetwork, data.isp, data.publicIp);
     updateSelectedServerDetails();
   } catch (error) {
     if (error.sources) showSourceStatus(error.sources);
     nearbyServers = [];
-    els.serverSelect.replaceChildren(new Option('请刷新附近节点', ''));
+    selectedServerID = '';
+    els.cnServerSelect.replaceChildren(new Option('请刷新 CN 节点', ''));
+    els.netServerSelect.replaceChildren(new Option('请刷新 Speedtest.net 节点', ''));
+    els.cnServerCount.textContent = '—';
+    els.netServerCount.textContent = '—';
     showError(`节点加载失败：${error.message}`);
   } finally {
     serversLoading = false;
@@ -233,7 +275,7 @@ async function refreshState() {
 
 async function startTest() {
   if (testRunning || actionPending || !serversReady) return;
-  const input = {profile:els.profile.value, serverId:els.serverSelect.value};
+  const input = {profile:els.profile.value, serverId:selectedServerID};
   actionPending = 'starting';
   stateEpoch++;
   renderControls();
@@ -290,7 +332,8 @@ async function loadHistory() {
 
 els.start.addEventListener('click', () => testStatus === 'running' ? cancelTest() : startTest());
 els.refreshServers.addEventListener('click', loadServers);
-els.serverSelect.addEventListener('change', updateSelectedServerDetails);
+els.cnServerSelect.addEventListener('change', () => chooseServer(els.cnServerSelect.value, 'cn'));
+els.netServerSelect.addEventListener('change', () => chooseServer(els.netServerSelect.value, 'net'));
 els.clear.addEventListener('click', async () => { if (!historyItems.length || !confirm('确定清空全部测速记录吗？')) return; await api('history',{method:'DELETE'}); await loadHistory(); });
 
 function preventBoundaryOverscroll() {
