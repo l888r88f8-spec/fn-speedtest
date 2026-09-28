@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -239,6 +240,29 @@ func speedtestCNCandidates(targets []httpTarget, n networkIdentity, limit int) [
 	return selected
 }
 
+func speedtestCNQuickDownloadProbe(ctx context.Context, client *http.Client, target httpTarget) error {
+	probeCtx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+	defer cancel()
+	req, err := speedtestCNRequest(probeCtx, http.MethodGet, target.DownloadURL, nil, 0)
+	if err != nil {
+		return err
+	}
+	resp, err := speedtestCNLooseResponse(client, req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	var b [1]byte
+	n, readErr := resp.Body.Read(b[:])
+	if n > 0 {
+		return nil
+	}
+	if readErr != nil {
+		return readErr
+	}
+	return errors.New("download endpoint returned no data")
+}
+
 func (m *multiEngine) discoverSpeedtestCN(ctx context.Context, n networkIdentity) speedtestCNDiscoveryResult {
 	out := speedtestCNDiscoveryResult{Servers: []serverOption{}, Diagnostic: sourceDiagnostic{ID: "speedtestcn", Status: "unavailable", Failures: map[string]int{}}}
 	if m.cnDirectory == nil {
@@ -253,44 +277,89 @@ func (m *multiEngine) discoverSpeedtestCN(ctx context.Context, n networkIdentity
 		return out
 	}
 	out.Diagnostic.Candidates = len(targets)
-	targets = speedtestCNCandidates(targets, n, 24)
-	out.Diagnostic.Tested = 0
-
-	// Node discovery must stay fast enough for the fnOS gateway.  Speedtest.cn
-	// endpoints are often hosted on high ports and many of them intentionally
-	// ignore or delay synthetic probes.  Do not spend up to 8+4 seconds per node
-	// before the UI can render.  Cache every catalog candidate immediately and
-	// measure latency only when the user actually starts that node.
-	for _, target := range targets {
-		if err := ctx.Err(); err != nil {
-			out.Diagnostic.Status = "cancelled"
-			out.Diagnostic.Message = "请求已取消"
-			return out
-		}
+	// Probe a somewhat wider candidate pool, but keep the UI list compact.
+	// The probe reads only the first byte of /download and is heavily bounded,
+	// so it ranks real bandwidth reachability without performing a speed test.
+	targets = speedtestCNCandidates(targets, n, 32)
+	out.Diagnostic.Tested = len(targets)
+	type probed struct {
+		index int
+		target httpTarget
+		ready bool
+		err error
+	}
+	jobs := make(chan probed, len(targets))
+	results := make(chan probed, len(targets))
+	for i, target := range targets {
 		target.Network = n
-		m.mu.Lock()
-		m.targets[target.Source.ID] = verifiedTarget{target: target, expires: time.Now().Add(30 * time.Minute)}
-		m.mu.Unlock()
+		jobs <- probed{index: i, target: target}
+	}
+	close(jobs)
+	workers := min(16, len(targets))
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for range workers {
+		go func() {
+			defer wg.Done()
+			for item := range jobs {
+				item.err = speedtestCNQuickDownloadProbe(ctx, m.client, item.target)
+				item.ready = item.err == nil
+				results <- item
+			}
+		}()
+	}
+	go func() { wg.Wait(); close(results) }()
 
-		s := target.Source
+	ordered := make([]probed, len(targets))
+	for item := range results {
+		ordered[item.index] = item
+	}
+	if ctx.Err() != nil {
+		out.Diagnostic.Status = "cancelled"
+		out.Diagnostic.Message = "请求已取消"
+		return out
+	}
+	// Stable: keep region/carrier ordering inside each reachability class.
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if ordered[i].ready != ordered[j].ready {
+			return ordered[i].ready
+		}
+		return ordered[i].index < ordered[j].index
+	})
+	if len(ordered) > 24 {
+		ordered = ordered[:24]
+	}
+
+	readyCount := 0
+	for _, item := range ordered {
+		m.mu.Lock()
+		m.targets[item.target.Source.ID] = verifiedTarget{target: item.target, expires: time.Now().Add(30 * time.Minute)}
+		m.mu.Unlock()
+		if item.ready {
+			readyCount++
+		} else if item.err != nil {
+			out.Diagnostic.Failures["下载接口预探测失败（"+globalFailureReason(item.err)+"）"]++
+		}
+		s := item.target.Source
 		out.Servers = append(out.Servers, serverOption{
 			ID: s.ID, Name: s.Name, Sponsor: s.Sponsor, Carrier: s.Carrier,
 			Country: "中国", Province: s.Province,
 			ProvinceMatched: n.CountryCode == "CN" && n.Province != "" && n.Province == s.Province,
 			CarrierMatched:  n.Carrier != "" && n.Carrier == s.Carrier,
 			Mainland: true, Kind: "speedtestcn", Engine: "Speedtest.cn",
-			LatencyMeasured: false,
+			LatencyMeasured: false, BandwidthReady: item.ready,
 		})
 	}
 
-	out.Diagnostic.Available = len(out.Servers)
+	out.Diagnostic.Available = readyCount
 	if len(out.Servers) == 0 {
 		out.Diagnostic.Status = "no_candidates"
 		out.Diagnostic.Message = "节点目录没有可用候选"
 		return out
 	}
 	out.Diagnostic.Status = "available"
-	out.Diagnostic.Message = fmt.Sprintf("%d 个候选节点，延时待实测（开始测速时测量）", len(out.Servers))
+	pending := len(out.Servers) - readyCount
+	out.Diagnostic.Message = fmt.Sprintf("%d 个节点，%d 个下载接口可达，%d 个待验证；延时待实测", len(out.Servers), readyCount, pending)
 	return out
 }
 
