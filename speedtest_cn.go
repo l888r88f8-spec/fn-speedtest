@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -255,96 +254,43 @@ func (m *multiEngine) discoverSpeedtestCN(ctx context.Context, n networkIdentity
 	}
 	out.Diagnostic.Candidates = len(targets)
 	targets = speedtestCNCandidates(targets, n, 24)
-	out.Diagnostic.Tested = len(targets)
-	type checked struct {
-		target          httpTarget
-		latency, jitter float64
-		measured        bool
-		err             error
-	}
-	jobs := make(chan httpTarget, len(targets))
-	results := make(chan checked, len(targets))
+	out.Diagnostic.Tested = 0
+
+	// Node discovery must stay fast enough for the fnOS gateway.  Speedtest.cn
+	// endpoints are often hosted on high ports and many of them intentionally
+	// ignore or delay synthetic probes.  Do not spend up to 8+4 seconds per node
+	// before the UI can render.  Cache every catalog candidate immediately and
+	// measure latency only when the user actually starts that node.
 	for _, target := range targets {
+		if err := ctx.Err(); err != nil {
+			out.Diagnostic.Status = "cancelled"
+			out.Diagnostic.Message = "请求已取消"
+			return out
+		}
 		target.Network = n
-		jobs <- target
-	}
-	close(jobs)
-	workers := min(6, len(targets))
-	var wg sync.WaitGroup
-	wg.Add(workers)
-	for range workers {
-		go func() {
-			defer wg.Done()
-			for target := range jobs {
-				// Match ecsspeed's node-selection behavior: HTTP latency is the
-				// preferred signal, TCP handshake time is the fallback, and a
-				// failed advisory probe never removes the node from the list.
-				httpCtx, httpCancel := context.WithTimeout(ctx, 8*time.Second)
-				latency, jitter, httpErr := speedtestCNLatency(httpCtx, m.client, target, nil)
-				httpCancel()
-				if httpErr == nil && latency > 0 {
-					results <- checked{target: target, latency: latency, jitter: jitter, measured: true}
-					continue
-				}
-				tcpCtx, tcpCancel := context.WithTimeout(ctx, 4*time.Second)
-				tcpLatency, tcpErr := speedtestCNTCPLatency(tcpCtx, target)
-				tcpCancel()
-				if tcpErr == nil && tcpLatency > 0 {
-					results <- checked{target: target, latency: tcpLatency, measured: true, err: httpErr}
-					continue
-				}
-				if httpErr == nil {
-					httpErr = tcpErr
-				}
-				results <- checked{target: target, err: httpErr}
-			}
-		}()
-	}
-	go func() { wg.Wait(); close(results) }()
-	measuredCount := 0
-	for item := range results {
-		if item.err != nil {
-			out.Diagnostic.Failures["延时预探测失败（"+globalFailureReason(item.err)+"）"]++
-		}
 		m.mu.Lock()
-		m.targets[item.target.Source.ID] = verifiedTarget{target: item.target, expires: time.Now().Add(30 * time.Minute)}
+		m.targets[target.Source.ID] = verifiedTarget{target: target, expires: time.Now().Add(30 * time.Minute)}
 		m.mu.Unlock()
-		if item.measured {
-			measuredCount++
-		}
-		s := item.target.Source
-		out.Servers = append(out.Servers, serverOption{ID: s.ID, Name: s.Name, Sponsor: s.Sponsor, Carrier: s.Carrier, Country: "中国", Province: s.Province,
+
+		s := target.Source
+		out.Servers = append(out.Servers, serverOption{
+			ID: s.ID, Name: s.Name, Sponsor: s.Sponsor, Carrier: s.Carrier,
+			Country: "中国", Province: s.Province,
 			ProvinceMatched: n.CountryCode == "CN" && n.Province != "" && n.Province == s.Province,
-			CarrierMatched:  n.Carrier != "" && n.Carrier == s.Carrier, Mainland: true, Kind: "speedtestcn", Engine: "Speedtest.cn",
-			LatencyMS: round2(item.latency), JitterMS: round2(item.jitter), LatencyMeasured: item.measured})
+			CarrierMatched:  n.Carrier != "" && n.Carrier == s.Carrier,
+			Mainland: true, Kind: "speedtestcn", Engine: "Speedtest.cn",
+			LatencyMeasured: false,
+		})
 	}
-	if ctx.Err() != nil {
-		out.Diagnostic.Status = "cancelled"
-		out.Diagnostic.Message = "请求已取消"
-		return out
-	}
+
 	out.Diagnostic.Available = len(out.Servers)
 	if len(out.Servers) == 0 {
 		out.Diagnostic.Status = "no_candidates"
 		out.Diagnostic.Message = "节点目录没有可用候选"
 		return out
 	}
-	sort.SliceStable(out.Servers, func(i, j int) bool {
-		if out.Servers[i].LatencyMeasured != out.Servers[j].LatencyMeasured {
-			return out.Servers[i].LatencyMeasured
-		}
-		if !out.Servers[i].LatencyMeasured {
-			return false
-		}
-		return out.Servers[i].LatencyMS < out.Servers[j].LatencyMS
-	})
 	out.Diagnostic.Status = "available"
-	pending := len(out.Servers) - measuredCount
-	if pending > 0 {
-		out.Diagnostic.Message = fmt.Sprintf("%d 个候选节点，%d 个延时可测，%d 个待实测", len(out.Servers), measuredCount, pending)
-	} else {
-		out.Diagnostic.Message = fmt.Sprintf("%d 个候选节点，延时探测正常", len(out.Servers))
-	}
+	out.Diagnostic.Message = fmt.Sprintf("%d 个候选节点，延时将在开始测速时测量", len(out.Servers))
 	return out
 }
 
