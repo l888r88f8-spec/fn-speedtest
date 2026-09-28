@@ -127,6 +127,38 @@ func TestSpeedtestCNRunContinuesWhenLatencyUnavailable(t *testing.T) {
 	}
 }
 
+func TestSpeedtestCNUsesActualTransferSize(t *testing.T) {
+	var uploaded atomic.Int64
+	const downloadSize = 12345
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/download":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(make([]byte, downloadSize))
+		case "/upload":
+			n, _ := io.Copy(io.Discard, r.Body)
+			uploaded.Add(n)
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	target := httpTarget{Protocol: "speedtestcn", DownloadURL: server.URL + "/download", UploadURL: server.URL + "/upload"}
+	down, err := measureHTTPPhase(context.Background(), server.Client(), target, httpPhaseConfig{duration: time.Second, connections: 4, budget: 1 << 20}, nil)
+	if err != nil || down <= 0 {
+		t.Fatalf("variable download should succeed: rate=%v err=%v", down, err)
+	}
+	up, err := measureHTTPPhase(context.Background(), server.Client(), target, httpPhaseConfig{duration: time.Second, connections: 4, budget: 8 << 20, upload: true}, nil)
+	if err != nil || up <= 0 {
+		t.Fatalf("512 KiB upload should succeed: rate=%v err=%v", up, err)
+	}
+	if uploaded.Load() != 512<<10 {
+		t.Fatalf("unexpected upload size: got %d want %d", uploaded.Load(), 512<<10)
+	}
+}
+
 func TestHTTPPhaseCancellation(t *testing.T) {
 	for _, upload := range []bool{false, true} {
 		t.Run(map[bool]string{false: "download", true: "upload"}[upload], func(t *testing.T) {
