@@ -46,15 +46,15 @@ jobs:
 
       - name: Inspect package
         run: |
-          file dist/fnos-speedtest-1.10.5-x86_64.fpk
-          sha256sum dist/fnos-speedtest-1.10.5-x86_64.fpk
-          tar -tzf dist/fnos-speedtest-1.10.5-x86_64.fpk | sort
+          file dist/fnos-speedtest-1.10.6-x86_64.fpk
+          sha256sum dist/fnos-speedtest-1.10.6-x86_64.fpk
+          tar -tzf dist/fnos-speedtest-1.10.6-x86_64.fpk | sort
 
       - name: Upload FPK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: fnos-speedtest-1.10.5-x86_64
+          name: fnos-speedtest-1.10.6-x86_64
           path: |
-            dist/fnos-speedtest-1.10.5-x86_64.fpk
-            dist/fnos-speedtest-1.10.5-x86_64.fpk.sha256
+            dist/fnos-speedtest-1.10.6-x86_64.fpk
+            dist/fnos-speedtest-1.10.6-x86_64.fpk.sha256
           if-no-files-found: error
