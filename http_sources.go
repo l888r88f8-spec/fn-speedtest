@@ -32,10 +32,12 @@ var publicSources = []httpSource{
 type httpTarget struct {
 	Global                          bool
 	Protocol                        string
+	Version                         string
 	Host, SessionKey                string
 	Source                          httpSource
 	Network                         networkIdentity
 	PingURL, DownloadURL, UploadURL string
+	CustomURL                       string
 }
 type verifiedTarget struct {
 	target  httpTarget
@@ -83,7 +85,13 @@ func (m *multiEngine) Run(ctx context.Context, p profile, id string, progress pr
 	if !ok || time.Now().After(cached.expires) {
 		return testResult{}, errors.New("节点验证已过期，请刷新节点后重试")
 	}
-	// Starting a test uses the selected, validated target; no node discovery is repeated.
+	// Starting a test uses the selected cached target; no node discovery is repeated.
+	// Speedtest.cn uses two generations of server protocol.  Mirror spiritLHLS/ecs
+	// for classic nodes via speedtest-go CustomServer, while keeping the newer
+	// /hello,/download,/upload engine as a fallback for cloud/v2 nodes.
+	if cached.target.Protocol == "speedtestcn" {
+		return runSpeedtestCNHybrid(ctx, m.client, cached.target, p, progress, sample)
+	}
 	return runHTTPTest(ctx, m.client, cached.target, p, progress, sample)
 }
 
