@@ -113,7 +113,7 @@ function sortServersForDisplay(servers) {
     const latencyDiff = displayLatency(a) - displayLatency(b);
     if (Number.isFinite(latencyDiff) && latencyDiff !== 0) return latencyDiff;
     if (displayLatency(a) !== displayLatency(b)) return displayLatency(a) < displayLatency(b) ? -1 : 1;
-    return String(a.id).localeCompare(String(b.id));
+    return 0;
   });
 }
 
