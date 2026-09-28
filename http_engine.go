@@ -50,8 +50,10 @@ func speedtestCNRequest(ctx context.Context, method, address string, body io.Rea
 		return nil, err
 	}
 	req.Header.Set("User-Agent", speedtestCNBrowserUA)
-	req.Header.Set("Cache-Control", "no-cache, no-store")
-	req.Header.Set("Accept-Encoding", "identity")
+	req.Header.Set("Accept", "*/*")
+	// ecsspeed runs each curl probe as a fresh transfer. Avoid reusing a
+	// quirky /hello connection for /download on legacy Speedtest.cn servers.
+	req.Close = true
 	if method == http.MethodPost {
 		req.ContentLength = size
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -82,8 +84,21 @@ func httpTestResponse(client *http.Client, req *http.Request, download bool) (*h
 	return resp, nil
 }
 
+func speedtestCNTransferClient(client *http.Client) *http.Client {
+	clone := *client
+	if transport, ok := client.Transport.(*http.Transport); ok {
+		tr := transport.Clone()
+		tr.DisableKeepAlives = true
+		tr.ForceAttemptHTTP2 = false
+		tr.ResponseHeaderTimeout = 8 * time.Second
+		clone.Transport = tr
+	}
+	clone.Timeout = 0 // per-request contexts define the same max-time semantics as curl
+	return &clone
+}
+
 func speedtestCNResponse(client *http.Client, req *http.Request, download bool) (*http.Response, error) {
-	redirectClient := *client
+	redirectClient := *speedtestCNTransferClient(client)
 	redirectClient.CheckRedirect = func(next *http.Request, via []*http.Request) error {
 		if len(via) >= 10 {
 			return errors.New("测速接口重定向次数过多")
@@ -92,8 +107,8 @@ func speedtestCNResponse(client *http.Client, req *http.Request, download bool) 
 			return errors.New("测速接口重定向协议无效")
 		}
 		next.Header.Set("User-Agent", speedtestCNBrowserUA)
-		next.Header.Set("Cache-Control", "no-cache, no-store")
-		next.Header.Set("Accept-Encoding", "identity")
+		next.Header.Set("Accept", "*/*")
+		next.Close = true
 		return nil
 	}
 	resp, err := redirectClient.Do(req)
@@ -173,8 +188,8 @@ func speedtestCNLatency(ctx context.Context, client *http.Client, target httpTar
 			return errors.New("测速接口重定向协议无效")
 		}
 		next.Header.Set("User-Agent", speedtestCNBrowserUA)
-		next.Header.Set("Cache-Control", "no-cache, no-store")
-		next.Header.Set("Accept-Encoding", "identity")
+		next.Header.Set("Accept", "*/*")
+		next.Close = true
 		return nil
 	}
 
@@ -470,7 +485,11 @@ func measureSpeedtestCNPhase(ctx context.Context, client *http.Client, target ht
 			if ctx.Err() != nil {
 				return 0, ctx.Err()
 			}
-			if phaseCtx.Err() != nil && total > 0 {
+			// curl_speed_stat keeps %{speed_download}/%{size_download} even when
+			// curl reports a transfer error. Mirror that behavior: once a 2xx/3xx
+			// response produced real bytes, an early close/reset still yields a
+			// meaningful measurement instead of discarding the whole node.
+			if total > 0 {
 				break
 			}
 			return 0, readErr
@@ -486,7 +505,7 @@ func measureSpeedtestCNPhase(ctx context.Context, client *http.Client, target ht
 }
 
 func speedtestCNLooseResponse(client *http.Client, req *http.Request) (*http.Response, error) {
-	redirectClient := *client
+	redirectClient := *speedtestCNTransferClient(client)
 	redirectClient.CheckRedirect = func(next *http.Request, via []*http.Request) error {
 		if len(via) >= 10 {
 			return errors.New("测速接口重定向次数过多")
@@ -495,8 +514,8 @@ func speedtestCNLooseResponse(client *http.Client, req *http.Request) (*http.Res
 			return errors.New("测速接口重定向协议无效")
 		}
 		next.Header.Set("User-Agent", speedtestCNBrowserUA)
-		next.Header.Set("Cache-Control", "no-cache, no-store")
-		next.Header.Set("Accept-Encoding", "identity")
+		next.Header.Set("Accept", "*/*")
+		next.Close = true
 		return nil
 	}
 	resp, err := redirectClient.Do(req)
