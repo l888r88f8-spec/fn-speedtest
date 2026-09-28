@@ -1,7 +1,6 @@
 const $ = (id) => document.getElementById(id);
 const els = {
-  sourceHint: $('sourceHint'), start: $('startButton'), actionLabel: $('actionLabel'), actionIcon: $('actionIcon'), profile: $('profile'), cnServerSelect: $('cnServerSelect'), netServerSelect: $('netServerSelect'), cnServerCount: $('cnServerCount'), netServerCount: $('netServerCount'), refreshServers: $('refreshServersButton'), progressWrap: $('progressWrap'),
-  progressBar: $('progressBar'), progressText: $('progressText'), phase: $('phaseText'), error: $('actionError'),
+  sourceHint: $('sourceHint'), start: $('startButton'), actionLabel: $('actionLabel'), actionIcon: $('actionIcon'), profile: $('profile'), cnServerSelect: $('cnServerSelect'), netServerSelect: $('netServerSelect'), cnServerCount: $('cnServerCount'), netServerCount: $('netServerCount'), refreshServers: $('refreshServersButton'), error: $('actionError'),
   down: $('downloadValue'), up: $('uploadValue'), latency: $('latencyValue'), jitter: $('jitterValue'),
   downProgress: $('downloadProgressBar'), upProgress: $('uploadProgressBar'), downProgressText: $('downloadProgressText'), upProgressText: $('uploadProgressText'),
   server: $('serverValue'), sponsor: $('sponsorValue'), isp: $('ispValue'), region: $('regionValue'), ip: $('ipValue'), body: $('historyBody'), empty: $('emptyHistory'),
@@ -60,7 +59,6 @@ function renderControls() {
   els.cnServerSelect.disabled = testRunning || !serversReady;
   els.netServerSelect.disabled = testRunning || !serversReady;
   els.refreshServers.disabled = testRunning || serversLoading;
-  els.progressWrap.classList.toggle('hidden', !running);
   document.querySelectorAll('.metric strong').forEach(el => el.classList.toggle('pulse', running));
 }
 
@@ -252,9 +250,6 @@ async function refreshState() {
     renderControls();
     if (testRunning && !polling) polling = setInterval(refreshState, 400);
     if (state.status === 'running') {
-      els.progressBar.style.width = `${state.progress || 0}%`;
-      els.progressText.textContent = `${state.progress || 0}%`;
-      els.phase.textContent = phaseName(state.phase);
       if (Number(state.liveDownloadMbps) > 0) els.down.textContent = n(state.liveDownloadMbps);
       if (Number(state.liveUploadMbps) > 0) els.up.textContent = n(state.liveUploadMbps);
       if (Number(state.liveLatencyMs) > 0) els.latency.textContent = n(state.liveLatencyMs);

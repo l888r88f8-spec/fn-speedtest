@@ -143,19 +143,22 @@ func runSpeedtestCNCLI(ctx context.Context, target httpTarget, p profile, progre
 }
 
 func runSpeedtestCNCustom(ctx context.Context, target httpTarget, p profile, progress progressFunc, sample sampleFunc) (testResult, error) {
-	cliResult, cliErr := runSpeedtestCNCLI(ctx, target, p, progress, sample)
-	if cliErr == nil {
-		return cliResult, nil
-	}
-	if err := ctx.Err(); err != nil {
-		return testResult{}, err
-	}
-	progress("connecting", 24, "内置 CLI 未成功，正在使用 Go 兼容库重试")
+	// The library path exposes live download/upload callbacks, so it is the
+	// primary path for the fnOS UI. The bundled CLI remains a compatibility
+	// fallback for servers that behave differently under the library path.
 	libraryResult, libraryErr := runSpeedtestCNCustomLibrary(ctx, target, p, progress, sample)
 	if libraryErr == nil {
 		return libraryResult, nil
 	}
-	return testResult{}, fmt.Errorf("内置CLI：%v；兼容库：%v", cliErr, libraryErr)
+	if err := ctx.Err(); err != nil {
+		return testResult{}, err
+	}
+	progress("connecting", 24, "实时测速内核未成功，正在使用内置 speedtest-go 兼容模式")
+	cliResult, cliErr := runSpeedtestCNCLI(ctx, target, p, progress, sample)
+	if cliErr == nil {
+		return cliResult, nil
+	}
+	return testResult{}, fmt.Errorf("实时库：%v；内置CLI：%v", libraryErr, cliErr)
 }
 
 func newSpeedtestCNCustomClient(p profile) *speedtest.Speedtest {
@@ -190,12 +193,12 @@ func runSpeedtestCNCustomLibrary(ctx context.Context, target httpTarget, p profi
 		}
 	})
 
-	progress("connecting", 18, "正在使用 Go 兼容库连接 Speedtest.cn 节点")
+	progress("connecting", 18, "正在连接 Speedtest.cn 节点")
 	server, err := client.CustomServer(target.CustomURL)
 	if err != nil {
 		return testResult{}, fmt.Errorf("兼容库节点初始化失败：%w", err)
 	}
-	progress("latency", 31, "正在检测兼容节点延迟")
+	progress("latency", 31, "正在实时检测节点延迟")
 	latencyCtx, cancelLatency := context.WithTimeout(ctx, 8*time.Second)
 	pingErr := server.PingTestContext(latencyCtx, func(latency time.Duration) {
 		if sample != nil {
@@ -207,7 +210,7 @@ func runSpeedtestCNCustomLibrary(ctx context.Context, target httpTarget, p profi
 	if err := ctx.Err(); err != nil { return testResult{}, err }
 	if pingErr != nil { server.Latency = 0; server.Jitter = 0 }
 
-	progress("download", 45, "正在使用 Go 兼容库测量下载速度")
+	progress("download", 45, "正在实时测量下载速度")
 	downloadPercent := 0
 	if sample != nil { sample(liveSample{DownloadPercent: &downloadPercent}) }
 	downloadStarted = time.Now()
@@ -221,7 +224,7 @@ func runSpeedtestCNCustomLibrary(ctx context.Context, target httpTarget, p profi
 	downloadPercent = 100
 	if sample != nil { sample(liveSample{DownloadMbps: &download, DownloadPercent: &downloadPercent}) }
 
-	progress("upload", 73, "正在使用 Go 兼容库测量上传速度")
+	progress("upload", 73, "正在实时测量上传速度")
 	uploadPercent := 0
 	if sample != nil { sample(liveSample{UploadPercent: &uploadPercent}) }
 	uploadStarted = time.Now()
