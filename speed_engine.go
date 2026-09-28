@@ -271,5 +271,8 @@ func networkError(prefix string, err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
-	return fmt.Errorf("%s，请检查 NAS 的公网连接", prefix)
+	if err == nil {
+		return fmt.Errorf("%s，请检查 NAS 的公网连接", prefix)
+	}
+	return fmt.Errorf("%s：%s，请检查 NAS 的公网连接", prefix, globalFailureReason(err))
 }
