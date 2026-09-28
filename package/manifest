@@ -1,5 +1,5 @@
 appname=fnos-speedtest
-version=1.10.6
+version=1.10.7
 display_name=牛速
 desc=为飞牛 NAS 设计的多源公网测速工具。接入 Speedtest.cn，并根据公网 IP、运营商和省份清晰分组、智能匹配节点。
 source=thirdparty
@@ -11,4 +11,4 @@ desktop_applaunchname=fnos-speedtest.Application
 ctl_stop=true
 checkport=false
 disable_authorization_path=true
-changelog=修复节点列表加载超时：Speedtest.cn 节点先返回、延时改为开始测速时测量；限制其他节点源发现等待时间，并显示网关/HTTP真实错误。
+changelog=提升 Speedtest.cn 兼容性：使用独立新连接并贴近 curl 请求行为；下载收到有效数据后即使连接被重置也按实际字节计速；节点列表优先显示下载接口实际可达的节点，并细分网络错误原因。
