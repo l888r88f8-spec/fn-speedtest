@@ -85,7 +85,7 @@ function serverLabel(server) {
   const carrier = server.carrier || server.sponsor || '未知网络';
   const distance = Number(server.distanceKm) > 0 ? `｜${n(server.distanceKm)} km` : '';
   const latency = server.kind === 'speedtestcn' && !server.latencyMeasured
-    ? '延时待实测'
+    ? `${server.bandwidthReady ? '下载可达' : '未验证'} · 延时待实测`
     : `${n(server.latencyMs)} ms｜抖动 ${n(server.jitterMs || 0)} ms`;
   return `${place || '未知地区'}｜${carrier}｜${latency}${distance}`;
 }
