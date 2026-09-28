@@ -19,7 +19,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22.x'
+          go-version: '1.26.x'
           cache: true
 
       - name: Install build tools
@@ -34,7 +34,7 @@ jobs:
 
       - name: Download official Go dependencies
         run: |
-          go mod download
+          go mod tidy
           grep 'github.com/showwin/speedtest-go v1.8.3' go.sum
 
       - name: Test
