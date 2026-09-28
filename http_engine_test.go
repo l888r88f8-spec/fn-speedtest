@@ -73,6 +73,7 @@ func TestHTTPProbeAndComplete(t *testing.T) {
 	}
 	// The cached selected ID can run a full quick test with no metadata or discovery calls.
 	m := newMultiEngine()
+	m.supplementalNet = nil
 	m.globalDirectory = nil
 	m.cnDirectory = nil
 	m.client = server.Client()
