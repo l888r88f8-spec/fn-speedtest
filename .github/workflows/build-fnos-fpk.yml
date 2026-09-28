@@ -34,7 +34,7 @@ jobs:
 
       - name: Download official Go dependencies
         run: |
-          go mod tidy
+          go mod download
           grep 'github.com/showwin/speedtest-go v1.8.3' go.sum
 
       - name: Test
