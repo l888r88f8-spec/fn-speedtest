@@ -113,11 +113,11 @@ HTTP 快速／标准／深度模式每个阶段最多 5／10／12 秒，最多 1
 - 预检查失败节点在下拉框显示“延时待实测”，排序时放在已有有效延时的节点之后。
 - 真正开始测速时，即使 `pingUrl` 失败，也会继续尝试下载/上传接口；下载/上传才是节点是否可用的最终判定。
 - Speedtest.cn HTTP 请求允许正常的 HTTP/HTTPS 重定向，与 `curl -L` 的行为更接近。
-- 仓库新增 `.github/workflows/build-fnos-fpk.yml`，在 GitHub Actions 使用 Go 1.22、官方 `speedtest-go` 依赖和官方 `fnpack 1.2.3` 构建 x86_64 FPK。
+- 仓库新增 `.github/workflows/build-fnos-fpk.yml`，在 GitHub Actions 使用 Go 1.26、官方 `speedtest-go` 依赖和官方 `fnpack 1.2.3` 构建 x86_64 FPK。
 
 ## 从源码构建
 
-需要 Go 1.22+、ImageMagick 和飞牛官方 `fnpack` 1.2.3+：
+需要 Go 1.26+、ImageMagick 和飞牛官方 `fnpack` 1.2.3+：
 
 ```bash
 chmod +x build.sh
