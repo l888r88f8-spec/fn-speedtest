@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	appVersion = "1.10.7"
+	appVersion = "1.10.8"
 	basePath   = "/app/fnos-speedtest"
 )
 
