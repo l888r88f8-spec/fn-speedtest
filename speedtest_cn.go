@@ -290,7 +290,7 @@ func (m *multiEngine) discoverSpeedtestCN(ctx context.Context, n networkIdentity
 		return out
 	}
 	out.Diagnostic.Status = "available"
-	out.Diagnostic.Message = fmt.Sprintf("%d 个候选节点，延时将在开始测速时测量", len(out.Servers))
+	out.Diagnostic.Message = fmt.Sprintf("%d 个候选节点，延时待实测（开始测速时测量）", len(out.Servers))
 	return out
 }
 
