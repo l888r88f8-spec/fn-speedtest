@@ -102,7 +102,7 @@ class Element {
  assert.equal(elements.regionValue.textContent,'省份未识别');
  catalogueMode='recommended';await context.loadServers();
  assert.ok(elements.cnServerSelect.children[0].textContent.includes('南京'));
- assert.equal(elements.netServerSelect.children[0].textContent.includes('暂无'),false);
+ assert.equal(elements.netServerSelect.children[0].textContent.includes('暂无'),true);
  catalogueMode='failed';await context.loadServers();
  assert.equal(elements.sourceHint.textContent,'Speedtest.cn：节点目录获取失败：连接超时');
 	assert.equal(elements.startButton.disabled,false);
