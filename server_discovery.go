@@ -154,35 +154,23 @@ func probeServer(ctx context.Context, client *http.Client, s *speedtest.Server) 
 	}
 	u.Path = path.Join(path.Dir(u.Path), "latency.txt")
 	u.RawQuery = ""
-	samples := make([]float64, 0, 3)
-	for i := 0; i < 4; i++ {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-		if err != nil {
-			return err
-		}
-		req.Header.Set("User-Agent", "fnOS-Speedtest/"+appVersion)
-		began := time.Now()
-		resp, err := client.Do(req)
-		if err != nil {
-			return err
-		}
-		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		resp.Body.Close()
-		elapsed := time.Since(began)
-		if readErr != nil || resp.StatusCode != http.StatusOK || strings.TrimSpace(string(body)) != "test=test" {
-			return errors.New("invalid Speedtest latency response")
-		}
-		if i > 0 {
-			samples = append(samples, float64(elapsed))
-		}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return err
 	}
-	mean := (samples[0] + samples[1] + samples[2]) / 3
-	variance := 0.0
-	for _, n := range samples {
-		variance += (n - mean) * (n - mean)
+	req.Header.Set("User-Agent", "fnOS-Speedtest/"+appVersion)
+	began := time.Now()
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
 	}
-	s.Latency = time.Duration(mean)
-	s.Jitter = time.Duration(math.Sqrt(variance / 3))
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	resp.Body.Close()
+	if readErr != nil || resp.StatusCode != http.StatusOK || strings.TrimSpace(string(body)) != "test=test" {
+		return errors.New("invalid Speedtest latency response")
+	}
+	s.Latency = time.Since(began)
+	s.Jitter = 0
 	return nil
 }
 
@@ -213,7 +201,7 @@ func discoverForNetwork(ctx context.Context, client *http.Client, endpoint strin
 		wg.Add(1)
 		go func(i int, query string) {
 			defer wg.Done()
-			fetchCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+			fetchCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
 			defer cancel()
 			// Failure of a supplemental query must not discard working nearby nodes.
 			list, err := fetchDirectory(fetchCtx, client, endpoint, query, user)
@@ -232,13 +220,13 @@ func discoverForNetwork(ctx context.Context, client *http.Client, endpoint strin
 		jobs <- s
 	}
 	close(jobs)
-	for i := 0; i < 12; i++ {
+	for i := 0; i < 24; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for s := range jobs {
 				s.Latency = speedtest.PingTimeout
-				probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+				probeCtx, cancel := context.WithTimeout(ctx, 1200*time.Millisecond)
 				err := probeServer(probeCtx, client, s)
 				cancel()
 				if err != nil {

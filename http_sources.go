@@ -48,6 +48,8 @@ type multiEngine struct {
 	cnDirectory     func(context.Context, *http.Client, networkIdentity) ([]httpTarget, error)
 	mu              sync.RWMutex
 	targets         map[string]verifiedTarget
+	health          map[string]serverHealthEntry
+	healthFile      string
 	sources         []httpSource
 	client          *http.Client
 	detect          func(context.Context) (*speedtest.User, networkIdentity)
@@ -64,7 +66,7 @@ func newMultiEngine() *multiEngine {
 		return fetchGlobalTargets(ctx, client, globalCatalogURL, n)
 	}, cnDirectory: fetchSpeedtestCNCatalog, detect: detectNetworkForSources, directory: func(ctx context.Context, client *http.Client, user *speedtest.User, n networkIdentity) (serverListResponse, error) {
 		return discoverForNetwork(ctx, client, "https://www.speedtest.net/api/js/servers", user, n)
-	}, sources: publicSources, targets: map[string]verifiedTarget{}, client: &http.Client{
+	}, sources: publicSources, targets: map[string]verifiedTarget{}, health: map[string]serverHealthEntry{}, client: &http.Client{
 		Transport: transport, Timeout: 8 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse },
 	}}
@@ -73,23 +75,27 @@ func sourceEligible(_ httpSource, _ networkIdentity) bool {
 	return true
 }
 func (m *multiEngine) Run(ctx context.Context, p profile, id string, progress progressFunc, sample sampleFunc) (testResult, error) {
+	var result testResult
+	var err error
 	if !strings.HasPrefix(id, "http:") {
-		return (speedtestNetRunner{}).Run(ctx, p, id, progress, sample)
+		result, err = (speedtestNetRunner{}).Run(ctx, p, id, progress, sample)
+	} else {
+		m.mu.RLock()
+		cached, ok := m.targets[id]
+		m.mu.RUnlock()
+		if !ok || time.Now().After(cached.expires) {
+			return testResult{}, errors.New("节点信息已过期，请刷新节点后重试")
+		}
+		if cached.target.Protocol == "speedtestcn" {
+			result, err = runSpeedtestCNHybrid(ctx, m.client, cached.target, p, progress, sample)
+		} else {
+			result, err = runHTTPTest(ctx, m.client, cached.target, p, progress, sample)
+		}
 	}
-	m.mu.RLock()
-	cached, ok := m.targets[id]
-	m.mu.RUnlock()
-	if !ok || time.Now().After(cached.expires) {
-		return testResult{}, errors.New("节点验证已过期，请刷新节点后重试")
+	if !errors.Is(err, context.Canceled) {
+		m.recordHealth(id, err == nil, result.LatencyMS)
 	}
-	// Starting a test uses the selected cached target; no node discovery is repeated.
-	// Speedtest.cn uses two generations of server protocol.  Mirror spiritLHLS/ecs
-	// for classic nodes via speedtest-go CustomServer, while keeping the newer
-	// /hello,/download,/upload engine as a fallback for cloud/v2 nodes.
-	if cached.target.Protocol == "speedtestcn" {
-		return runSpeedtestCNHybrid(ctx, m.client, cached.target, p, progress, sample)
-	}
-	return runHTTPTest(ctx, m.client, cached.target, p, progress, sample)
+	return result, err
 }
 
 func (m *multiEngine) Discover(ctx context.Context) (serverListResponse, error) {
@@ -100,14 +106,14 @@ func (m *multiEngine) Discover(ctx context.Context) (serverListResponse, error) 
 	}
 	speedResults := make(chan result, 1)
 	go func() {
-		cctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+		cctx, cancel := context.WithTimeout(ctx, 6*time.Second)
 		defer cancel()
 		list, err := m.directory(cctx, m.client, user, n)
 		speedResults <- result{list, err}
 	}()
 	cnResults := make(chan speedtestCNDiscoveryResult, 1)
 	go func() {
-		cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		cctx, cancel := context.WithTimeout(ctx, 7*time.Second)
 		defer cancel()
 		cnResults <- m.discoverSpeedtestCN(cctx, n)
 	}()
@@ -166,6 +172,9 @@ func (m *multiEngine) Discover(ctx context.Context) (serverListResponse, error) 
 	cn := <-cnResults
 	list.Servers = append(list.Servers, cn.Servers...)
 	list.Sources = []sourceDiagnostic{cn.Diagnostic}
+	for i := range list.Servers {
+		m.applyHealth(&list.Servers[i])
+	}
 	if ctx.Err() != nil {
 		return serverListResponse{}, ctx.Err()
 	}
@@ -177,13 +186,15 @@ func (m *multiEngine) Discover(ctx context.Context) (serverListResponse, error) 
 }
 func (m *multiEngine) forget(id string) { m.mu.Lock(); delete(m.targets, id); m.mu.Unlock() }
 func rankServerOptions(list *serverListResponse) {
-	reachable := func(s serverOption) bool {
-		if s.Kind == "speedtestcn" {
-			return s.BandwidthReady
+	healthRank := func(s serverOption) int {
+		switch s.HealthStatus {
+		case "success":
+			return 0
+		case "failed":
+			return 2
+		default:
+			return 1
 		}
-		// Speedtest.net and resolved public HTTP nodes have already passed their
-		// own discovery/verification path before reaching this list.
-		return true
 	}
 	latency := func(s serverOption) float64 {
 		if s.LatencyMS > 0 {
@@ -192,8 +203,8 @@ func rankServerOptions(list *serverListResponse) {
 		return 1e12
 	}
 	sort.SliceStable(list.Servers, func(i, j int) bool {
-		if reachable(list.Servers[i]) != reachable(list.Servers[j]) {
-			return reachable(list.Servers[i])
+		if healthRank(list.Servers[i]) != healthRank(list.Servers[j]) {
+			return healthRank(list.Servers[i]) < healthRank(list.Servers[j])
 		}
 		li, lj := latency(list.Servers[i]), latency(list.Servers[j])
 		if li != lj {

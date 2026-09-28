@@ -79,29 +79,27 @@ function showNetwork(network, isp, ip) {
 }
 
 function serverLabel(server) {
-  const placeParts = [];
-  if (server.province) placeParts.push(server.province);
-  if (server.name && server.name !== server.province) placeParts.push(server.name);
-  if (!placeParts.length && server.country) placeParts.push(server.country);
-  const place = placeParts.join(' ');
-  const carrier = server.carrier || server.sponsor || '未知网络';
-  const distance = Number(server.distanceKm) > 0 ? `｜${n(server.distanceKm)} km` : '';
-  const measured = Number(server.latencyMs) > 0;
-  let latency = measured ? `${n(server.latencyMs)} ms` : '延时待实测';
-  if (server.kind === 'speedtestcn') {
-    latency = `${server.bandwidthReady ? '测速协议可达' : '待验证'}｜${latency}`;
-  } else if (measured && Number(server.jitterMs) > 0) {
-    latency += `｜抖动 ${n(server.jitterMs)} ms`;
-  }
-  return `${place || '未知地区'}｜${carrier}｜${latency}${distance}`;
+  const place = server.name || server.province || server.country || '未知';
+  let carrier = server.carrier || server.sponsor || '';
+  carrier = carrier
+    .replace(/^中国电信$/, '电信')
+    .replace(/^中国联通$/, '联通')
+    .replace(/^中国移动$/, '移动')
+    .replace(/^中国广电$/, '广电');
+  if (carrier.length > 12) carrier = carrier.slice(0, 12);
+  const latency = Number(server.latencyMs) > 0 ? `${n(server.latencyMs)} ms` : '待测';
+  const status = server.healthStatus === 'success' ? '可用' : server.healthStatus === 'failed' ? '最近失败' : '';
+  return [place, carrier, latency, status].filter(Boolean).join(' ');
 }
 
 function serverEngine(server) {
   return server.engine || (server.kind === 'speedtestcn' ? 'Speedtest.cn' : 'Speedtest.net');
 }
 
-function serverReachable(server) {
-  return server.kind === 'speedtestcn' ? Boolean(server.bandwidthReady) : true;
+function serverHealthRank(server) {
+  if (server.healthStatus === 'success') return 0;
+  if (server.healthStatus === 'failed') return 2;
+  return 1;
 }
 
 function displayLatency(server) {
@@ -111,7 +109,7 @@ function displayLatency(server) {
 
 function sortServersForDisplay(servers) {
   return [...servers].sort((a, b) => {
-    if (serverReachable(a) !== serverReachable(b)) return serverReachable(a) ? -1 : 1;
+    if (serverHealthRank(a) !== serverHealthRank(b)) return serverHealthRank(a) - serverHealthRank(b);
     const latencyDiff = displayLatency(a) - displayLatency(b);
     if (Number.isFinite(latencyDiff) && latencyDiff !== 0) return latencyDiff;
     if (displayLatency(a) !== displayLatency(b)) return displayLatency(a) < displayLatency(b) ? -1 : 1;
@@ -182,7 +180,7 @@ async function loadServers() {
     const makeOptions = (servers, placeholder) => [
       new Option(placeholder, ''),
       ...servers.map(server => new Option(
-        `${server.id === recommended.id ? '★ ' : ''}${serverLabel(server)}`,
+        `${serverLabel(server)}`,
         server.id
       ))
     ];

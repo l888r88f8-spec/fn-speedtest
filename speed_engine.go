@@ -40,6 +40,7 @@ type serverOption struct {
 	JitterMS        float64 `json:"jitterMs"`
 	LatencyMeasured bool    `json:"latencyMeasured,omitempty"`
 	BandwidthReady  bool    `json:"bandwidthReady,omitempty"`
+	HealthStatus    string  `json:"healthStatus,omitempty"`
 	Mainland        bool    `json:"mainland"`
 	CarrierMatched  bool    `json:"carrierMatched,omitempty"`
 	Recommended     bool    `json:"recommended,omitempty"`

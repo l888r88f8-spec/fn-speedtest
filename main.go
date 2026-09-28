@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	appVersion = "1.10.12"
+	appVersion = "1.10.13"
 	basePath   = "/app/fnos-speedtest"
 )
 
@@ -86,7 +86,9 @@ type application struct {
 }
 
 func newApplication(dataDir string) *application {
+	_ = os.MkdirAll(dataDir, 0750)
 	engine := newMultiEngine()
+	engine.setHealthFile(filepath.Join(dataDir, "server-health.json"))
 	a := &application{
 		state:       testState{Status: "idle", Phase: "idle", Progress: 0},
 		historyFile: filepath.Join(dataDir, "history.json"),
@@ -94,7 +96,6 @@ func newApplication(dataDir string) *application {
 		discoverer:  engine,
 	}
 	a.history = make([]testResult, 0)
-	_ = os.MkdirAll(dataDir, 0750)
 	a.loadHistory()
 	return a
 }

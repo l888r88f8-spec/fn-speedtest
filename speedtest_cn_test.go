@@ -243,7 +243,7 @@ func TestSpeedtestCNDiscoveryKeepsCandidateWhenAdvisoryProbeFails(t *testing.T) 
 	if out.Servers[0].LatencyMeasured {
 		t.Fatalf("unexpected measured latency: %+v", out.Servers[0])
 	}
-	if !strings.Contains(out.Diagnostic.Message, "待验证") {
+	if !strings.Contains(out.Diagnostic.Message, "延时可测") {
 		t.Fatalf("diagnostic=%q", out.Diagnostic.Message)
 	}
 	m.mu.RLock()
@@ -296,15 +296,15 @@ func TestLiveSpeedtestCNCatalog(t *testing.T) {
 }
 
 
-func TestRankServerOptionsReachableThenLatency(t *testing.T) {
+func TestRankServerOptionsHealthThenLatency(t *testing.T) {
 	list := serverListResponse{Servers: []serverOption{
-		{ID: "cn-pending-fast", Kind: "speedtestcn", LatencyMS: 2, LatencyMeasured: true},
-		{ID: "net-20", Kind: "speedtest", LatencyMS: 20},
-		{ID: "cn-ready-10", Kind: "speedtestcn", BandwidthReady: true, LatencyMS: 10, LatencyMeasured: true},
-		{ID: "net-5", Kind: "speedtest", LatencyMS: 5},
+		{ID: "failed-fast", HealthStatus: "failed", LatencyMS: 2},
+		{ID: "unknown-20", LatencyMS: 20},
+		{ID: "success-30", HealthStatus: "success", LatencyMS: 30},
+		{ID: "unknown-5", LatencyMS: 5},
 	}}
 	rankServerOptions(&list)
-	want := []string{"net-5", "cn-ready-10", "net-20", "cn-pending-fast"}
+	want := []string{"success-30", "unknown-5", "unknown-20", "failed-fast"}
 	for i, id := range want {
 		if list.Servers[i].ID != id {
 			t.Fatalf("order=%+v", list.Servers)

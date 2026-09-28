@@ -250,22 +250,10 @@ func speedtestCNOneShotLatency(ctx context.Context, client *http.Client, address
 	return float64(time.Since(started).Microseconds()) / 1000, nil
 }
 
-func speedtestCNDiscoveryLatency(ctx context.Context, client *http.Client, target httpTarget) (float64, error) {
-	classicURL, classicErr := speedtestCNClassicLatencyURL(target)
-	addresses := []string{target.PingURL}
-	if target.Version == "1" && classicErr == nil {
-		addresses = []string{classicURL, target.PingURL}
-	} else if classicErr == nil {
-		addresses = append(addresses, classicURL)
-	}
-	for _, address := range addresses {
-		if value, err := speedtestCNOneShotLatency(ctx, client, address); err == nil && value > 0 {
-			return value, nil
-		}
-	}
-	tcpCtx, cancel := context.WithTimeout(ctx, 1200*time.Millisecond)
+func speedtestCNDiscoveryLatency(ctx context.Context, _ *http.Client, target httpTarget) (float64, error) {
+	probeCtx, cancel := context.WithTimeout(ctx, 700*time.Millisecond)
 	defer cancel()
-	return speedtestCNTCPLatency(tcpCtx, target)
+	return speedtestCNTCPLatency(probeCtx, target)
 }
 
 func speedtestCNFirstByteProbe(ctx context.Context, client *http.Client, address string) error {
@@ -330,15 +318,13 @@ func (m *multiEngine) discoverSpeedtestCN(ctx context.Context, n networkIdentity
 		out.Diagnostic.Message = "节点目录获取失败：" + globalFailureReason(err)
 		return out
 	}
-	out.Diagnostic.Candidates = len(targets)
-	// Probe the complete public catalog. The catalog is intentionally kept whole:
-	// protocol reachability is a display/sort signal, not a filter.
 	targets = speedtestCNCandidates(targets, n, len(targets))
+	out.Diagnostic.Candidates = len(targets)
 	out.Diagnostic.Tested = len(targets)
+
 	type probed struct {
 		index           int
 		target          httpTarget
-		ready           bool
 		latency         float64
 		latencyMeasured bool
 		err             error
@@ -350,19 +336,16 @@ func (m *multiEngine) discoverSpeedtestCN(ctx context.Context, n networkIdentity
 		jobs <- probed{index: i, target: target}
 	}
 	close(jobs)
-	workers := min(20, len(targets))
+
+	workers := min(32, len(targets))
 	var wg sync.WaitGroup
 	wg.Add(workers)
 	for range workers {
 		go func() {
 			defer wg.Done()
 			for item := range jobs {
-				if latency, latencyErr := speedtestCNDiscoveryLatency(ctx, m.client, item.target); latencyErr == nil && latency > 0 {
-					item.latency = latency
-					item.latencyMeasured = true
-				}
-				item.err = speedtestCNQuickDownloadProbe(ctx, m.client, item.target)
-				item.ready = item.err == nil
+				item.latency, item.err = speedtestCNDiscoveryLatency(ctx, m.client, item.target)
+				item.latencyMeasured = item.err == nil && item.latency > 0
 				results <- item
 			}
 		}()
@@ -378,51 +361,37 @@ func (m *multiEngine) discoverSpeedtestCN(ctx context.Context, n networkIdentity
 		out.Diagnostic.Message = "请求已取消"
 		return out
 	}
-	// Stable: keep region/carrier ordering inside each reachability class.
-	sort.SliceStable(ordered, func(i, j int) bool {
-		if ordered[i].ready != ordered[j].ready {
-			return ordered[i].ready
-		}
-		return ordered[i].index < ordered[j].index
-	})
-	if len(ordered) > 24 {
-		ordered = ordered[:24]
-	}
 
-	readyCount := 0
+	measured := 0
 	for _, item := range ordered {
 		m.mu.Lock()
 		m.targets[item.target.Source.ID] = verifiedTarget{target: item.target, expires: time.Now().Add(30 * time.Minute)}
 		m.mu.Unlock()
-		if item.ready {
-			readyCount++
+		if item.latencyMeasured {
+			measured++
 		} else if item.err != nil {
-			out.Diagnostic.Failures["测速协议预探测失败（"+globalFailureReason(item.err)+"）"]++
+			out.Diagnostic.Failures["延时探测失败（"+globalFailureReason(item.err)+"）"]++
 		}
 		s := item.target.Source
 		out.Servers = append(out.Servers, serverOption{
 			ID: s.ID, Name: s.Name, Sponsor: s.Sponsor, Carrier: s.Carrier,
 			Country: "中国", Province: s.Province,
 			ProvinceMatched: n.CountryCode == "CN" && n.Province != "" && n.Province == s.Province,
-			CarrierMatched:  n.Carrier != "" && n.Carrier == s.Carrier,
+			CarrierMatched: n.Carrier != "" && n.Carrier == s.Carrier,
 			Mainland: true, Kind: "speedtestcn", Engine: "Speedtest.cn",
-			LatencyMS: round2(item.latency), JitterMS: 0,
-			LatencyMeasured: item.latencyMeasured, BandwidthReady: item.ready,
+			LatencyMS: round2(item.latency), JitterMS: 0, LatencyMeasured: item.latencyMeasured,
 		})
 	}
-
-	out.Diagnostic.Available = readyCount
+	out.Diagnostic.Available = measured
 	if len(out.Servers) == 0 {
 		out.Diagnostic.Status = "no_candidates"
 		out.Diagnostic.Message = "节点目录没有可用候选"
 		return out
 	}
 	out.Diagnostic.Status = "available"
-	pending := len(out.Servers) - readyCount
-	out.Diagnostic.Message = fmt.Sprintf("已加载全部 %d 个节点，%d 个测速协议可达，%d 个待验证", len(out.Servers), readyCount, pending)
+	out.Diagnostic.Message = fmt.Sprintf("已加载 %d 个节点，%d 个延时可测", len(out.Servers), measured)
 	return out
 }
-
 func speedtestCNMainFailure(failures map[string]int) string {
 	type failure struct {
 		name  string
