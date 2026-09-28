@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
+	"strings"
+	"syscall"
 )
 
 // Only controlled labels and counts are returned to the browser, never URLs,
@@ -70,6 +73,34 @@ func globalFailureReason(err error) string {
 	}
 	if errors.Is(err, context.Canceled) {
 		return "请求中止"
+	}
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		return "连接被拒绝"
+	}
+	if errors.Is(err, syscall.ECONNRESET) {
+		return "连接被重置"
+	}
+	if errors.Is(err, syscall.EPIPE) {
+		return "连接已关闭"
+	}
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		return "响应提前结束"
+	}
+	if errors.Is(err, io.EOF) {
+		return "服务器提前关闭连接"
+	}
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "server gave http response to https client"):
+		return "HTTPS 节点返回了 HTTP 响应"
+	case strings.Contains(message, "tls"):
+		return "TLS 握手失败"
+	case strings.Contains(message, "malformed http"):
+		return "HTTP 响应格式异常"
+	case strings.Contains(message, "connection reset"):
+		return "连接被重置"
+	case strings.Contains(message, "connection refused"):
+		return "连接被拒绝"
 	}
 	return "连接或响应异常"
 }
