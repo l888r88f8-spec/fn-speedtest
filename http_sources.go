@@ -199,7 +199,7 @@ func rankServerOptions(list *serverListResponse) {
 		if li != lj {
 			return li < lj
 		}
-		return list.Servers[i].ID < list.Servers[j].ID
+		return false
 	})
 	list.RecommendedID = list.Servers[0].ID
 	for i := range list.Servers {
