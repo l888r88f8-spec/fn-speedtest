@@ -26,15 +26,15 @@
         <div class="server-control">
           <div class="control-label"><label>测速节点</label><button id="refreshServersButton" class="refresh-nodes" type="button">刷新节点</button></div>
           <div class="server-columns">
-            <div class="server-column">
-              <div class="server-column-title"><b>CN / 国内节点</b><span id="cnServerCount">—</span></div>
-              <select id="cnServerSelect" class="server-list" size="8" aria-label="CN 国内测速节点">
+            <div class="server-dropdown">
+              <div class="server-dropdown-label"><span>CN / 国内节点</span><small id="cnServerCount">—</small></div>
+              <select id="cnServerSelect" aria-label="CN 国内测速节点">
                 <option value="">正在加载 CN 节点…</option>
               </select>
             </div>
-            <div class="server-column">
-              <div class="server-column-title"><b>Speedtest.net</b><span id="netServerCount">—</span></div>
-              <select id="netServerSelect" class="server-list" size="8" aria-label="Speedtest.net 测速节点">
+            <div class="server-dropdown">
+              <div class="server-dropdown-label"><span>Speedtest.net</span><small id="netServerCount">—</small></div>
+              <select id="netServerSelect" aria-label="Speedtest.net 测速节点">
                 <option value="">正在加载 Speedtest.net 节点…</option>
               </select>
             </div>
@@ -85,7 +85,7 @@
       </div>
     </section>
 
-    <footer>牛速 v<span id="version">1.10.10</span> · 测速会消耗公网流量，请避开流量计费网络</footer>
+    <footer>牛速 v<span id="version">1.10.11</span> · 测速会消耗公网流量，请避开流量计费网络</footer>
   </main>
   <script src="app.js"></script>
 </body>

@@ -128,10 +128,10 @@ function chooseServer(id, column) {
   selectedServerID = id;
   if (column === 'cn') {
     els.cnServerSelect.value = id;
-    els.netServerSelect.selectedIndex = -1;
+    els.netServerSelect.value = '';
   } else {
     els.netServerSelect.value = id;
-    els.cnServerSelect.selectedIndex = -1;
+    els.cnServerSelect.value = '';
   }
   updateSelectedServerDetails();
 }
@@ -179,12 +179,15 @@ async function loadServers() {
     const recommended = nearbyServers.find(server => server.id === data.recommendedId) || nearbyServers.find(server => server.recommended) || cnServers[0] || netServers[0];
     if (!recommended) throw new Error('没有找到可用的测速节点');
 
-    const makeOptions = servers => servers.map(server => new Option(
-      `${server.id === recommended.id ? '★ ' : ''}${serverLabel(server)}`,
-      server.id
-    ));
-    els.cnServerSelect.replaceChildren(...(cnServers.length ? makeOptions(cnServers) : [new Option('暂无 CN 节点', '')]));
-    els.netServerSelect.replaceChildren(...(netServers.length ? makeOptions(netServers) : [new Option('暂无 Speedtest.net 节点', '')]));
+    const makeOptions = (servers, placeholder) => [
+      new Option(placeholder, ''),
+      ...servers.map(server => new Option(
+        `${server.id === recommended.id ? '★ ' : ''}${serverLabel(server)}`,
+        server.id
+      ))
+    ];
+    els.cnServerSelect.replaceChildren(...makeOptions(cnServers, cnServers.length ? '选择 CN / 国内节点' : '暂无 CN 节点'));
+    els.netServerSelect.replaceChildren(...makeOptions(netServers, netServers.length ? '选择 Speedtest.net 节点' : '暂无 Speedtest.net 节点'));
     els.cnServerCount.textContent = `${cnServers.length} 个`;
     els.netServerCount.textContent = `${netServers.length} 个`;
 
@@ -193,10 +196,10 @@ async function loadServers() {
     selectedServerID = preferred;
     if (preferredServer && serverColumn(preferredServer) === 'net') {
       els.netServerSelect.value = preferred;
-      els.cnServerSelect.selectedIndex = -1;
+      els.cnServerSelect.value = '';
     } else {
       els.cnServerSelect.value = preferred;
-      els.netServerSelect.selectedIndex = -1;
+      els.netServerSelect.value = '';
     }
     serversReady = Boolean(selectedServerID);
     currentNetwork = data.network || null;
