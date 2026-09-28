@@ -260,10 +260,21 @@ func speedtestCNCandidates(targets []httpTarget, n networkIdentity, limit int) [
 	return selected
 }
 
-func speedtestCNQuickDownloadProbe(ctx context.Context, client *http.Client, target httpTarget) error {
-	probeCtx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+func speedtestCNClassicDownloadURL(target httpTarget) (string, error) {
+	u, err := url.Parse(target.CustomURL)
+	if err != nil || u.Hostname() == "" {
+		return "", errors.New("invalid classic Speedtest server")
+	}
+	u.Path = "/speedtest/random1000x1000.jpg"
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String(), nil
+}
+
+func speedtestCNFirstByteProbe(ctx context.Context, client *http.Client, address string) error {
+	probeCtx, cancel := context.WithTimeout(ctx, 1300*time.Millisecond)
 	defer cancel()
-	req, err := speedtestCNRequest(probeCtx, http.MethodGet, target.DownloadURL, nil, 0)
+	req, err := speedtestCNRequest(probeCtx, http.MethodGet, address, nil, 0)
 	if err != nil {
 		return err
 	}
@@ -283,6 +294,32 @@ func speedtestCNQuickDownloadProbe(ctx context.Context, client *http.Client, tar
 	return errors.New("download endpoint returned no data")
 }
 
+func speedtestCNQuickDownloadProbe(ctx context.Context, client *http.Client, target httpTarget) error {
+	classicURL, classicErr := speedtestCNClassicDownloadURL(target)
+	tryClassic := func() error {
+		if classicErr != nil {
+			return classicErr
+		}
+		return speedtestCNFirstByteProbe(ctx, client, classicURL)
+	}
+	tryDirect := func() error {
+		return speedtestCNFirstByteProbe(ctx, client, target.DownloadURL)
+	}
+
+	// Match the real runner: classic v1 nodes prefer the ECS/speedtest-go layout;
+	// v2/cloud nodes prefer the newer Speedtest.cn /download endpoint.
+	if target.Version == "1" {
+		if err := tryClassic(); err == nil {
+			return nil
+		}
+		return tryDirect()
+	}
+	if err := tryDirect(); err == nil {
+		return nil
+	}
+	return tryClassic()
+}
+
 func (m *multiEngine) discoverSpeedtestCN(ctx context.Context, n networkIdentity) speedtestCNDiscoveryResult {
 	out := speedtestCNDiscoveryResult{Servers: []serverOption{}, Diagnostic: sourceDiagnostic{ID: "speedtestcn", Status: "unavailable", Failures: map[string]int{}}}
 	if m.cnDirectory == nil {
@@ -298,8 +335,9 @@ func (m *multiEngine) discoverSpeedtestCN(ctx context.Context, n networkIdentity
 	}
 	out.Diagnostic.Candidates = len(targets)
 	// Probe a somewhat wider candidate pool, but keep the UI list compact.
-	// The probe reads only the first byte of /download and is heavily bounded,
-	// so it ranks real bandwidth reachability without performing a speed test.
+	// The probe reads only the first byte from the protocol-appropriate download
+	// endpoint and is heavily bounded, so it ranks real bandwidth reachability
+	// without performing a full speed test.
 	targets = speedtestCNCandidates(targets, n, 32)
 	out.Diagnostic.Tested = len(targets)
 	type probed struct {
@@ -358,7 +396,7 @@ func (m *multiEngine) discoverSpeedtestCN(ctx context.Context, n networkIdentity
 		if item.ready {
 			readyCount++
 		} else if item.err != nil {
-			out.Diagnostic.Failures["下载接口预探测失败（"+globalFailureReason(item.err)+"）"]++
+			out.Diagnostic.Failures["测速协议预探测失败（"+globalFailureReason(item.err)+"）"]++
 		}
 		s := item.target.Source
 		out.Servers = append(out.Servers, serverOption{
@@ -379,7 +417,7 @@ func (m *multiEngine) discoverSpeedtestCN(ctx context.Context, n networkIdentity
 	}
 	out.Diagnostic.Status = "available"
 	pending := len(out.Servers) - readyCount
-	out.Diagnostic.Message = fmt.Sprintf("%d 个节点，%d 个下载接口可达，%d 个待验证；延时待实测", len(out.Servers), readyCount, pending)
+	out.Diagnostic.Message = fmt.Sprintf("%d 个节点，%d 个测速协议可达，%d 个待验证；延时待实测", len(out.Servers), readyCount, pending)
 	return out
 }
 
