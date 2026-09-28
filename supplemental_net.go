@@ -96,7 +96,6 @@ func parseSpiritNetCatalog(data []byte)([]supplementalNetNode,error){
 		if id==""||host==""||port==""||seen[id]{continue}
 		seen[id]=true
 		name:=strings.TrimSuffix(get(row,"city"),"市"); sponsor:=get(row,"supplier")
-		s:=&speedtest.Server{Name:name,Country:"China",CC:"CN",Sponsor:sponsor}
 		out=append(out,supplementalNetNode{ID:id,Name:name,Sponsor:sponsor,Province:supplementalProvince(name,sponsor),Carrier:canonicalCarrier(sponsor),Host:host+":"+port,URL:"http://"+host+":"+port+"/speedtest/upload.php"})
 	}
 	if len(out)==0{return nil,errors.New("empty spirit net catalog")}
@@ -121,7 +120,6 @@ func parseSukkaNetCatalog(data []byte)([]supplementalNetNode,error){
 		if !strings.EqualFold(x.CC,"CN")||x.ID==""||x.URL==""||seen[x.ID]{continue}
 		u,err:=url.Parse(x.URL);if err!=nil||u.Hostname()==""{continue}
 		seen[x.ID]=true
-		s:=&speedtest.Server{Name:x.Name,Country:x.Country,CC:x.CC,Sponsor:x.Sponsor}
 		out=append(out,supplementalNetNode{ID:x.ID,Name:x.Name,Sponsor:x.Sponsor,Province:supplementalProvince(x.Name,x.Sponsor),Carrier:canonicalCarrier(x.Sponsor),Host:x.Host,URL:x.URL})
 	}
 	if len(out)==0{return nil,errors.New("empty sukka net catalog")}
