@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PACKAGE_DIR="$ROOT_DIR/package"
 DIST_DIR="$ROOT_DIR/dist"
-VERSION="1.10.8"
+VERSION="1.10.9"
 OUT_FPK="$DIST_DIR/fnos-speedtest-${VERSION}-x86_64.fpk"
 
 mkdir -p "$PACKAGE_DIR/app/bin" "$PACKAGE_DIR/app/ui/images" "$PACKAGE_DIR/app/licenses" "$PACKAGE_DIR/wizard" "$DIST_DIR"
