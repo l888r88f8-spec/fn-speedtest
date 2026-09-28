@@ -95,14 +95,14 @@ func (m *multiEngine) Discover(ctx context.Context) (serverListResponse, error) 
 	}
 	speedResults := make(chan result, 1)
 	go func() {
-		cctx, cancel := context.WithTimeout(ctx, 28*time.Second)
+		cctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 		defer cancel()
 		list, err := m.directory(cctx, m.client, user, n)
 		speedResults <- result{list, err}
 	}()
 	cnResults := make(chan speedtestCNDiscoveryResult, 1)
 	go func() {
-		cctx, cancel := context.WithTimeout(ctx, 28*time.Second)
+		cctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 		defer cancel()
 		cnResults <- m.discoverSpeedtestCN(cctx, n)
 	}()
@@ -115,7 +115,7 @@ func (m *multiEngine) Discover(ctx context.Context) (serverListResponse, error) 
 		wg.Add(1)
 		go func(source httpSource) {
 			defer wg.Done()
-			cctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+			cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
 			target, err := resolveHTTPSource(cctx, m.client, source)
 			if err != nil {
