@@ -55,7 +55,7 @@ class Element {
    state={status:'running',phase:'download',progress:60,liveDownloadMbps:123.45,downloadProgress:42};
   }
   if(endpoint==='test/cancel') {await new Promise(r=>releaseCancel=r);state={...state,status:'cancelling'}}
-  return {ok:!(endpoint==='servers' && catalogueMode==='empty'),json:async()=>data};
+  return {ok:!(endpoint==='servers' && catalogueMode==='empty'),status:(endpoint==='servers' && catalogueMode==='empty')?502:200,text:async()=>JSON.stringify(data)};
  };
  const context=vm.createContext({document,window:{addEventListener(){}},fetch,Option:class extends Element {constructor(label,value){super();this.textContent=label;this.value=value}},setInterval:()=>1,clearInterval(){},confirm:()=>true,console});
  vm.runInContext(fs.readFileSync(path.join(__dirname,'web/app.js'),'utf8'),context);
