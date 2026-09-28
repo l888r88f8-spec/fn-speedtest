@@ -8,4 +8,4 @@
 4. 点击 **Run workflow**。
 5. 构建完成后，在该次运行底部下载 `fnos-speedtest-1.10.15-x86_64` Artifact。
 
-CI 使用 Go 1.22、官方 `github.com/showwin/speedtest-go v1.8.3` 依赖，并下载飞牛官方 `fnpack 1.2.3` 打包。
+CI 使用 Go 1.26、官方 `github.com/showwin/speedtest-go v1.8.3` 依赖，并下载飞牛官方 `fnpack 1.2.3` 打包。
