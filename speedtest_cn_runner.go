@@ -193,10 +193,10 @@ func runSpeedtestCNCustomLibrary(ctx context.Context, target httpTarget, p profi
 		}
 	})
 
-	progress("connecting", 18, "正在连接 Speedtest.cn 节点")
+	progress("connecting", 18, "正在连接 Speedtest.cn 实时测速节点")
 	server, err := client.CustomServer(target.CustomURL)
 	if err != nil {
-		return testResult{}, fmt.Errorf("兼容库节点初始化失败：%w", err)
+		return testResult{}, fmt.Errorf("实时引擎节点初始化失败：%w", err)
 	}
 	progress("latency", 31, "正在实时检测节点延迟")
 	latencyCtx, cancelLatency := context.WithTimeout(ctx, 8*time.Second)
@@ -218,9 +218,9 @@ func runSpeedtestCNCustomLibrary(ctx context.Context, target httpTarget, p profi
 	err = server.DownloadTestContext(downloadCtx)
 	cancelDownload()
 	if ctx.Err() != nil { return testResult{}, ctx.Err() }
-	if err != nil { return testResult{}, fmt.Errorf("兼容库下载失败：%w", err) }
+	if err != nil { return testResult{}, fmt.Errorf("实时引擎下载失败：%w", err) }
 	download := server.DLSpeed.Mbps()
-	if download <= 0 { return testResult{}, errors.New("兼容库下载未返回有效速度") }
+	if download <= 0 { return testResult{}, errors.New("实时引擎下载未返回有效速度") }
 	downloadPercent = 100
 	if sample != nil { sample(liveSample{DownloadMbps: &download, DownloadPercent: &downloadPercent}) }
 
@@ -232,9 +232,9 @@ func runSpeedtestCNCustomLibrary(ctx context.Context, target httpTarget, p profi
 	err = server.UploadTestContext(uploadCtx)
 	cancelUpload()
 	if ctx.Err() != nil { return testResult{}, ctx.Err() }
-	if err != nil { return testResult{}, fmt.Errorf("兼容库上传失败：%w", err) }
+	if err != nil { return testResult{}, fmt.Errorf("实时引擎上传失败：%w", err) }
 	upload := server.ULSpeed.Mbps()
-	if upload <= 0 { return testResult{}, errors.New("兼容库上传未返回有效速度") }
+	if upload <= 0 { return testResult{}, errors.New("实时引擎上传未返回有效速度") }
 	uploadPercent = 100
 	if sample != nil { sample(liveSample{UploadMbps: &upload, UploadPercent: &uploadPercent}) }
 

@@ -27,7 +27,7 @@ class Element {
  let state={status:'idle'},starts=0,catalogs=0,chosen='',releaseStart,releaseState,releaseCancel,holdState=false;
  const fetch=async (url,options={})=> {
   const endpoint=url.slice(4);let data={};
-  if(endpoint==='info') data={version:'1.10.14'};
+  if(endpoint==='info') data={version:'1.10.15'};
   if(endpoint==='history') data=null; // Empty history must still render without map errors.
   if(endpoint==='servers') {catalogs++;data={publicIp:'114.114.114.114',network:{publicIp:'114.114.114.114',carrier:'中国电信',countryCode:'CN',province:'江苏'},recommendedId:'http:cn:1',sources:[{id:'speedtestcn',status:'available'}],servers:[
    {id:'http:cn:1',name:'南京',province:'江苏',country:'中国',sponsor:'中国电信',carrier:'中国电信',kind:'speedtestcn',engine:'Speedtest.cn',mainland:true,provinceMatched:true,carrierMatched:true,latencyMeasured:true,healthStatus:'success',latencyMs:8,jitterMs:.3,recommended:true},

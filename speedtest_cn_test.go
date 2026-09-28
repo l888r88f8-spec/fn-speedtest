@@ -334,3 +334,10 @@ func TestBundledSpeedtestGoCLIResult(t *testing.T) {
 		t.Fatalf("result=%+v", result)
 	}
 }
+
+
+func TestSpeedtestLibraryVersion(t *testing.T) {
+	if got := speedtest.Version(); got != "1.8.3" {
+		t.Fatalf("speedtest-go library version=%q want 1.8.3", got)
+	}
+}
