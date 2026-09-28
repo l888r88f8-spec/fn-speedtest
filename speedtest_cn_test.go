@@ -167,6 +167,7 @@ func TestSpeedtestCNDiscoveryAndSelectedRun(t *testing.T) {
 		t.Fatalf("direct probe failed: %v: %v", err, errors.Unwrap(err))
 	}
 	m := newMultiEngine()
+	m.supplementalNet = nil
 	m.client = server.Client()
 	m.sources = nil
 	m.cnDirectory = func(context.Context, *http.Client, networkIdentity) ([]httpTarget, error) {
