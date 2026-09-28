@@ -387,10 +387,136 @@ func httpConfig(p profile, upload bool) httpPhaseConfig {
 	return c
 }
 
+// Speedtest.cn uses variable-size HTTP responses. Match ecsspeed-cn more closely:
+ // use the bytes actually transferred instead of requiring every response to be
+ // exactly one fixed chunk, and use a single 512 KiB binary POST for upload.
+func measureSpeedtestCNPhase(ctx context.Context, client *http.Client, target httpTarget, c httpPhaseConfig, sample sampleFunc) (float64, error) {
+	phaseCtx, cancel := context.WithTimeout(ctx, c.duration)
+	defer cancel()
+	started := time.Now()
+
+	emit := func(bytes int64, percent int) float64 {
+		elapsed := time.Since(started).Seconds()
+		if elapsed <= 0 {
+			return 0
+		}
+		value := float64(bytes) * 8 / elapsed / 1e6
+		if sample != nil && ctx.Err() == nil {
+			if c.upload {
+				sample(liveSample{UploadMbps: &value, UploadPercent: &percent})
+			} else {
+				sample(liveSample{DownloadMbps: &value, DownloadPercent: &percent})
+			}
+		}
+		return value
+	}
+
+	if c.upload {
+		const payloadSize = 512 << 10
+		payload := make([]byte, payloadSize)
+		req, err := speedtestCNRequest(phaseCtx, http.MethodPost, target.UploadURL, bytes.NewReader(payload), int64(len(payload)))
+		if err != nil {
+			return 0, err
+		}
+		resp, err := speedtestCNLooseResponse(client, req)
+		if err != nil {
+			if ctx.Err() != nil {
+				return 0, ctx.Err()
+			}
+			return 0, err
+		}
+		_, readErr := io.Copy(io.Discard, io.LimitReader(resp.Body, 256<<10))
+		resp.Body.Close()
+		if readErr != nil && ctx.Err() != nil {
+			return 0, ctx.Err()
+		}
+		return emit(int64(len(payload)), 100), nil
+	}
+
+	req, err := speedtestCNRequest(phaseCtx, http.MethodGet, target.DownloadURL, nil, 0)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := speedtestCNLooseResponse(client, req)
+	if err != nil {
+		if ctx.Err() != nil {
+			return 0, ctx.Err()
+		}
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	buffer := make([]byte, 64<<10)
+	var total int64
+	lastEmit := time.Now()
+	for total < c.budget {
+		want := len(buffer)
+		if remain := c.budget - total; remain < int64(want) {
+			want = int(remain)
+		}
+		n, readErr := resp.Body.Read(buffer[:want])
+		if n > 0 {
+			total += int64(n)
+			if time.Since(lastEmit) >= 250*time.Millisecond {
+				percent := min(99, int(time.Since(started)*100/c.duration))
+				emit(total, percent)
+				lastEmit = time.Now()
+			}
+		}
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
+			if ctx.Err() != nil {
+				return 0, ctx.Err()
+			}
+			if phaseCtx.Err() != nil && total > 0 {
+				break
+			}
+			return 0, readErr
+		}
+	}
+	if total <= 0 {
+		if phaseCtx.Err() != nil {
+			return 0, phaseCtx.Err()
+		}
+		return 0, errors.New("节点没有返回有效测速数据")
+	}
+	return emit(total, 100), nil
+}
+
+func speedtestCNLooseResponse(client *http.Client, req *http.Request) (*http.Response, error) {
+	redirectClient := *client
+	redirectClient.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return errors.New("测速接口重定向次数过多")
+		}
+		if next.URL.Scheme != "http" && next.URL.Scheme != "https" {
+			return errors.New("测速接口重定向协议无效")
+		}
+		next.Header.Set("User-Agent", speedtestCNBrowserUA)
+		next.Header.Set("Cache-Control", "no-cache, no-store")
+		next.Header.Set("Accept-Encoding", "identity")
+		return nil
+	}
+	resp, err := redirectClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		resp.Body.Close()
+		return nil, globalHTTPFailure(resp.StatusCode)
+	}
+	return resp, nil
+}
+
 // Each phase stops at either its time or traffic budget. Rates are bytes actually
 // read (download) or fully acknowledged (upload), divided by elapsed time. No
 // bytes from failed POSTs are counted. Workers are joined before returning.
 func measureHTTPPhase(ctx context.Context, client *http.Client, target httpTarget, c httpPhaseConfig, sample sampleFunc) (float64, error) {
+	if target.Protocol == "speedtestcn" {
+		return measureSpeedtestCNPhase(ctx, client, target, c, sample)
+	}
 	phaseCtx, cancel := context.WithTimeout(ctx, c.duration)
 	defer cancel()
 	started := time.Now()
