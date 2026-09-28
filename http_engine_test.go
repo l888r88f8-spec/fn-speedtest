@@ -363,6 +363,7 @@ func TestPublicSourcesAreUngatedAndRankingUsesLatency(t *testing.T) {
 func TestMultiSourceDiscoveryFallback(t *testing.T) {
 	server, target, _ := mockHTTPSource(t)
 	m := newMultiEngine()
+	m.supplementalNet = nil
 	m.globalDirectory = nil
 	m.cnDirectory = nil
 	m.client = server.Client()
