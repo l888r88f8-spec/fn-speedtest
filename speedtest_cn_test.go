@@ -34,6 +34,9 @@ func TestParseSpeedtestCNCatalogFiltersZhejiangUniversity(t *testing.T) {
 	if target.Source.ID != "http:cn:1" || target.Source.Province != "江苏" || target.Source.Carrier != "中国电信" || target.Protocol != "speedtestcn" {
 		t.Fatalf("unexpected target: %+v", target)
 	}
+	if target.Version != "2" || target.CustomURL != "http://node.example:8080/upload.php" {
+		t.Fatalf("protocol metadata was not preserved: %+v", target)
+	}
 	if blockedSpeedtestCNNode("Duke Kunshan University") {
 		t.Fatal("non-ZJU university was blocked")
 	}
@@ -86,6 +89,41 @@ func mockSpeedtestCN(t *testing.T) (*httptest.Server, httpTarget) {
 	source := httpSource{ID: "http:cn:1", Name: "南京", Sponsor: "中国电信", Province: "江苏", Carrier: "中国电信", Kind: "speedtestcn", Page: "https://www.speedtest.cn/"}
 	target := httpTarget{Protocol: "speedtestcn", Source: source, Network: networkIdentity{PublicIP: "114.114.114.114", ISP: "中国电信", Carrier: "中国电信", CountryCode: "CN", Province: "江苏"}, PingURL: server.URL + "/hello", DownloadURL: server.URL + "/download", UploadURL: server.URL + "/upload"}
 	return server, target
+}
+
+func TestSpeedtestCNClassicProbeUsesECSLayout(t *testing.T) {
+	var classicHits, directHits int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/speedtest/random1000x1000.jpg":
+			classicHits++
+			_, _ = w.Write([]byte{1})
+		case "/download":
+			directHits++
+			http.Error(w, "direct endpoint should not be primary for v1", http.StatusServiceUnavailable)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	target := httpTarget{Protocol: "speedtestcn", Version: "1", CustomURL: server.URL + "/upload.php", DownloadURL: server.URL + "/download"}
+	if err := speedtestCNQuickDownloadProbe(context.Background(), server.Client(), target); err != nil {
+		t.Fatalf("classic ECS probe failed: %v", err)
+	}
+	if classicHits != 1 || directHits != 0 {
+		t.Fatalf("classicHits=%d directHits=%d", classicHits, directHits)
+	}
+}
+
+func TestSpeedtestCNECSCustomServerPath(t *testing.T) {
+	client := newSpeedtestCNCustomClient(profiles["quick"])
+	server, err := client.CustomServer("http://node.example:8080/upload.php")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if server.URL != "http://node.example:8080/speedtest/upload.php" {
+		t.Fatalf("custom server URL=%q", server.URL)
+	}
 }
 
 func TestSpeedtestCNLatencyFollowsCrossHostRedirectAndKeepsSuccessfulSamples(t *testing.T) {
