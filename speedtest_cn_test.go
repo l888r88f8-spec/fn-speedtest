@@ -243,7 +243,7 @@ func TestSpeedtestCNDiscoveryKeepsCandidateWhenAdvisoryProbeFails(t *testing.T) 
 	if out.Servers[0].LatencyMeasured {
 		t.Fatalf("unexpected measured latency: %+v", out.Servers[0])
 	}
-	if !strings.Contains(out.Diagnostic.Message, "待实测") {
+	if !strings.Contains(out.Diagnostic.Message, "待验证") {
 		t.Fatalf("diagnostic=%q", out.Diagnostic.Message)
 	}
 	m.mu.RLock()
