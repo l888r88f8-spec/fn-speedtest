@@ -69,11 +69,8 @@ func newMultiEngine() *multiEngine {
 		CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse },
 	}}
 }
-func sourceEligible(s httpSource, n networkIdentity) bool {
-	if s.Kind != "operator" {
-		return true
-	}
-	return n.CountryCode == "CN" && n.Province == s.Province && n.Carrier == s.Carrier
+func sourceEligible(_ httpSource, _ networkIdentity) bool {
+	return true
 }
 func (m *multiEngine) Run(ctx context.Context, p profile, id string, progress progressFunc, sample sampleFunc) (testResult, error) {
 	if !strings.HasPrefix(id, "http:") {
@@ -110,7 +107,7 @@ func (m *multiEngine) Discover(ctx context.Context) (serverListResponse, error) 
 	}()
 	cnResults := make(chan speedtestCNDiscoveryResult, 1)
 	go func() {
-		cctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+		cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		cnResults <- m.discoverSpeedtestCN(cctx, n)
 	}()
@@ -180,33 +177,30 @@ func (m *multiEngine) Discover(ctx context.Context) (serverListResponse, error) 
 }
 func (m *multiEngine) forget(id string) { m.mu.Lock(); delete(m.targets, id); m.mu.Unlock() }
 func rankServerOptions(list *serverListResponse) {
-	score := func(s serverOption) float64 {
-		if s.Kind == "speedtestcn" && !s.LatencyMeasured {
-			// A successful first-byte /download probe is stronger evidence than
-			// TCP/region metadata. Prefer those nodes while keeping unverified
-			// catalog entries selectable as fallbacks.
-			v := 1e6
-			if s.BandwidthReady {
-				v = 30
-			}
-			if s.CarrierMatched {
-				v *= .82
-			}
-			if s.ProvinceMatched {
-				v *= .9
-			}
-			return v
+	reachable := func(s serverOption) bool {
+		if s.Kind == "speedtestcn" {
+			return s.BandwidthReady
 		}
-		v := s.LatencyMS + .5*s.JitterMS
-		if s.CarrierMatched {
-			v *= .82
-		}
-		if s.ProvinceMatched {
-			v *= .9
-		}
-		return v
+		// Speedtest.net and resolved public HTTP nodes have already passed their
+		// own discovery/verification path before reaching this list.
+		return true
 	}
-	sort.SliceStable(list.Servers, func(i, j int) bool { return score(list.Servers[i]) < score(list.Servers[j]) })
+	latency := func(s serverOption) float64 {
+		if s.LatencyMS > 0 {
+			return s.LatencyMS
+		}
+		return 1e12
+	}
+	sort.SliceStable(list.Servers, func(i, j int) bool {
+		if reachable(list.Servers[i]) != reachable(list.Servers[j]) {
+			return reachable(list.Servers[i])
+		}
+		li, lj := latency(list.Servers[i]), latency(list.Servers[j])
+		if li != lj {
+			return li < lj
+		}
+		return list.Servers[i].ID < list.Servers[j].ID
+	})
 	list.RecommendedID = list.Servers[0].ID
 	for i := range list.Servers {
 		list.Servers[i].Recommended = i == 0

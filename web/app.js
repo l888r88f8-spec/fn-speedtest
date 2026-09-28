@@ -84,9 +84,13 @@ function serverLabel(server) {
   const place = placeParts.join(' ');
   const carrier = server.carrier || server.sponsor || '未知网络';
   const distance = Number(server.distanceKm) > 0 ? `｜${n(server.distanceKm)} km` : '';
-  const latency = server.kind === 'speedtestcn' && !server.latencyMeasured
-    ? `${server.bandwidthReady ? '测速协议可达' : '未验证'} · 延时待实测`
-    : `${n(server.latencyMs)} ms｜抖动 ${n(server.jitterMs || 0)} ms`;
+  const measured = Number(server.latencyMs) > 0;
+  let latency = measured ? `${n(server.latencyMs)} ms` : '延时待实测';
+  if (server.kind === 'speedtestcn') {
+    latency = `${server.bandwidthReady ? '测速协议可达' : '待验证'}｜${latency}`;
+  } else if (measured && Number(server.jitterMs) > 0) {
+    latency += `｜抖动 ${n(server.jitterMs)} ms`;
+  }
   return `${place || '未知地区'}｜${carrier}｜${latency}${distance}`;
 }
 
@@ -94,16 +98,23 @@ function serverEngine(server) {
   return server.engine || (server.kind === 'speedtestcn' ? 'Speedtest.cn' : 'Speedtest.net');
 }
 
-function serverGroup(server) {
-  if (server.kind === 'speedtestcn') {
-    if (server.provinceMatched && server.carrierMatched) return 'cn-exact';
-    if (server.carrierMatched) return 'cn-carrier';
-    if (server.provinceMatched) return 'cn-province';
-    return 'cn-other';
-  }
-  if (server.kind === 'operator') return 'operator';
-  if (server.kind === 'university') return 'university';
-  return server.mainland ? 'mainland' : 'nearby';
+function serverReachable(server) {
+  return server.kind === 'speedtestcn' ? Boolean(server.bandwidthReady) : true;
+}
+
+function displayLatency(server) {
+  const value = Number(server.latencyMs);
+  return Number.isFinite(value) && value > 0 ? value : Number.POSITIVE_INFINITY;
+}
+
+function sortServersForDisplay(servers) {
+  return [...servers].sort((a, b) => {
+    if (serverReachable(a) !== serverReachable(b)) return serverReachable(a) ? -1 : 1;
+    const latencyDiff = displayLatency(a) - displayLatency(b);
+    if (Number.isFinite(latencyDiff) && latencyDiff !== 0) return latencyDiff;
+    if (displayLatency(a) !== displayLatency(b)) return displayLatency(a) < displayLatency(b) ? -1 : 1;
+    return String(a.id).localeCompare(String(b.id));
+  });
 }
 
 function updateSelectedServerDetails() {
@@ -139,26 +150,13 @@ async function loadServers() {
   try {
     const data = await api('servers');
     showSourceStatus(data.sources);
-    nearbyServers = Array.isArray(data.servers) ? data.servers : [];
-    const recommended = nearbyServers.find(server => server.id === data.recommendedId) || nearbyServers.find(server => server.recommended);
-    if (!recommended) throw new Error('没有找到可用的附近节点');
-    const options = [new Option(`★ 智能推荐｜${serverEngine(recommended)}｜${serverLabel(recommended)}`, recommended.id)];
-    for (const [kind, label] of [
-      ['cn-exact', 'Speedtest.cn · 同省同运营商'],
-      ['cn-carrier', 'Speedtest.cn · 同运营商其他省'],
-      ['cn-province', 'Speedtest.cn · 本省其他网络'],
-      ['cn-other', 'Speedtest.cn · 其他中国节点'],
-      ['operator', '公开运营商节点'],
-      ['university', '高校节点'],
-      ['mainland', 'Speedtest.net · 中国境内'],
-      ['nearby', 'Speedtest.net · 其他附近']
-    ]) {
-      const group = document.createElement('optgroup');
-      group.label = label;
-      nearbyServers.filter(server => server.id !== recommended.id && serverGroup(server) === kind)
-        .forEach(server => group.append(new Option(serverLabel(server), server.id)));
-      if (group.children.length) options.push(group);
-    }
+    nearbyServers = sortServersForDisplay(Array.isArray(data.servers) ? data.servers : []);
+    const recommended = nearbyServers.find(server => server.id === data.recommendedId) || nearbyServers.find(server => server.recommended) || nearbyServers[0];
+    if (!recommended) throw new Error('没有找到可用的测速节点');
+    const options = nearbyServers.map(server => new Option(
+      `${server.id === recommended.id ? '★ ' : ''}${serverLabel(server)}`,
+      server.id
+    ));
     els.serverSelect.replaceChildren(...options);
     if (previous && nearbyServers.some(server => server.id === previous)) els.serverSelect.value = previous;
     else els.serverSelect.value = recommended.id;

@@ -28,10 +28,10 @@ class Element {
   if(endpoint==='info') data={version:'1.10.8'};
   if(endpoint==='history') data=null; // Empty history must still render without map errors.
   if(endpoint==='servers') {catalogs++;data={publicIp:'114.114.114.114',network:{publicIp:'114.114.114.114',carrier:'中国电信',countryCode:'CN',province:'江苏'},recommendedId:'http:cn:1',sources:[{id:'speedtestcn',status:'available'}],servers:[
-   {id:'http:cn:1',name:'南京',province:'江苏',country:'中国',sponsor:'中国电信',carrier:'中国电信',kind:'speedtestcn',engine:'Speedtest.cn',mainland:true,provinceMatched:true,carrierMatched:true,latencyMeasured:true,latencyMs:8,jitterMs:.3,recommended:true},
-   {id:'http:cn:2',name:'杭州',province:'浙江',country:'中国',sponsor:'中国电信',carrier:'中国电信',kind:'speedtestcn',engine:'Speedtest.cn',mainland:true,carrierMatched:true,latencyMeasured:true,latencyMs:10,jitterMs:.4},
-   {id:'http:cn:3',name:'苏州',province:'江苏',country:'中国',sponsor:'中国联通',carrier:'中国联通',kind:'speedtestcn',engine:'Speedtest.cn',mainland:true,provinceMatched:true,latencyMeasured:true,latencyMs:11,jitterMs:.5},
-   {id:'http:cn:4',name:'成都',province:'四川',country:'中国',sponsor:'中国移动',carrier:'中国移动',kind:'speedtestcn',engine:'Speedtest.cn',mainland:true,latencyMeasured:true,latencyMs:16,jitterMs:.6},
+   {id:'http:cn:1',name:'南京',province:'江苏',country:'中国',sponsor:'中国电信',carrier:'中国电信',kind:'speedtestcn',engine:'Speedtest.cn',mainland:true,provinceMatched:true,carrierMatched:true,latencyMeasured:true,bandwidthReady:true,latencyMs:8,jitterMs:.3,recommended:true},
+   {id:'http:cn:2',name:'杭州',province:'浙江',country:'中国',sponsor:'中国电信',carrier:'中国电信',kind:'speedtestcn',engine:'Speedtest.cn',mainland:true,carrierMatched:true,latencyMeasured:true,bandwidthReady:true,latencyMs:10,jitterMs:.4},
+   {id:'http:cn:3',name:'苏州',province:'江苏',country:'中国',sponsor:'中国联通',carrier:'中国联通',kind:'speedtestcn',engine:'Speedtest.cn',mainland:true,provinceMatched:true,latencyMeasured:true,bandwidthReady:false,latencyMs:11,jitterMs:.5},
+   {id:'http:cn:4',name:'成都',province:'四川',country:'中国',sponsor:'中国移动',carrier:'中国移动',kind:'speedtestcn',engine:'Speedtest.cn',mainland:true,latencyMeasured:true,bandwidthReady:false,latencyMs:16,jitterMs:.6},
    {id:'cn1',name:'上海',country:'中国',sponsor:'中国联通',mainland:true,latencyMs:8,jitterMs:.3},
    {id:'cn2',name:'北京',country:'中国',sponsor:'中国电信',mainland:true,latencyMs:16,jitterMs:.6},
    {id:'http:edu',name:'高校',sponsor:'大学',kind:'university',mainland:true,latencyMs:12},
@@ -64,14 +64,12 @@ class Element {
  assert.equal(elements.startButton.disabled,false);
  assert.equal(elements.ispValue.textContent,'中国电信');
  assert.equal(elements.regionValue.textContent,'江苏 · IP 归属地');
- assert.equal(elements.serverSelect.children.find(x=>x.label==='Speedtest.cn · 同省同运营商'),undefined); // Recommended item is not duplicated.
- assert.equal(elements.serverSelect.children.find(x=>x.label==='Speedtest.cn · 同运营商其他省').children[0].value,'http:cn:2');
- assert.equal(elements.serverSelect.children.find(x=>x.label==='Speedtest.cn · 本省其他网络').children[0].value,'http:cn:3');
- assert.equal(elements.serverSelect.children.find(x=>x.label==='Speedtest.cn · 其他中国节点').children[0].value,'http:cn:4');
- assert.equal(elements.serverSelect.children.find(x=>x.label==='Speedtest.net · 中国境内').children.length,2);
- assert.equal(elements.serverSelect.children.find(x=>x.label==='高校节点').children[0].value,'http:edu');
-	 assert.equal(elements.serverSelect.children.find(x=>x.label==='公开运营商节点').children[0].value,'http:isp');
- assert.equal(elements.serverSelect.children.some(x=>x.label==='全球网测节点'),false);
+ assert.equal(elements.serverSelect.children.some(x=>x.label),false); // No engine/province/carrier optgroups.
+ assert.equal(elements.serverSelect.children.length,9);
+ assert.equal(elements.serverSelect.children[0].value,'http:cn:1');
+ assert.equal(elements.serverSelect.children[1].value,'cn1');
+ assert.equal(elements.serverSelect.children[2].value,'http:cn:2');
+ assert.ok(elements.serverSelect.children[0].textContent.includes('测速协议可达'));
  elements.serverSelect.value='http:cn:2';
  const starting=elements.startButton.click();
  assert.equal(elements.startButton.disabled,true);
@@ -100,7 +98,7 @@ class Element {
  context.showResult({publicIp:'8.8.8.8',isp:'Other ISP',downloadMbps:1,uploadMbps:1,latencyMs:1,jitterMs:1,durationSec:1});
  assert.equal(elements.regionValue.textContent,'省份未识别');
  catalogueMode='recommended';await context.loadServers();
- assert.ok(elements.serverSelect.children[0].textContent.includes('Speedtest.cn'));
+ assert.ok(elements.serverSelect.children[0].textContent.includes('南京'));
  assert.equal(elements.serverSelect.children.some(x=>x.label==='全球网测节点'),false);
  catalogueMode='failed';await context.loadServers();
  assert.equal(elements.sourceHint.textContent,'Speedtest.cn：节点目录获取失败：连接超时');
@@ -108,5 +106,5 @@ class Element {
 	catalogueMode='empty';await context.loadServers();
  assert.equal(elements.sourceHint.textContent,'Speedtest.cn：节点目录获取失败：连接超时');
  assert.equal(elements.startButton.disabled,true);
- console.log('PASS: Speedtest.cn source diagnostics and clear match groups; GlobalSpeed hidden; selected ID, one start request, no repeat discovery, immediate cancel freeze, stale poll suppression, stopped/error states, empty history');
+ console.log('PASS: flat reachability/latency-sorted node list; source diagnostics; selected ID; one start request; cancel and stale-poll handling; empty history');
 })().catch(error=>{console.error(error);process.exit(1)});

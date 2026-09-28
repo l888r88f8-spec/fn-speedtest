@@ -264,16 +264,15 @@ func TestSpeedtestCNFailureSummary(t *testing.T) {
 	}
 }
 
-func TestSpeedtestCNCandidateOrder(t *testing.T) {
+func TestSpeedtestCNCandidatesKeepFullCatalogOrder(t *testing.T) {
 	mk := func(id, province, carrier string) httpTarget {
 		return httpTarget{Source: httpSource{ID: id, Province: province, Carrier: carrier}}
 	}
 	targets := []httpTarget{mk("other", "四川", "中国移动"), mk("province", "江苏", "中国联通"), mk("carrier", "浙江", "中国电信"), mk("exact", "江苏", "中国电信")}
 	selected := speedtestCNCandidates(targets, networkIdentity{CountryCode: "CN", Province: "江苏", Carrier: "中国电信"}, len(targets))
-	want := []string{"exact", "carrier", "province", "other"}
-	for i := range want {
-		if selected[i].Source.ID != want[i] {
-			t.Fatalf("order=%+v", selected)
+	for i := range targets {
+		if selected[i].Source.ID != targets[i].Source.ID {
+			t.Fatalf("catalog order changed: got=%+v", selected)
 		}
 	}
 }
@@ -294,4 +293,44 @@ func TestLiveSpeedtestCNCatalog(t *testing.T) {
 		}
 	}
 	t.Logf("parsed %d eligible live catalog nodes", len(targets))
+}
+
+
+func TestRankServerOptionsReachableThenLatency(t *testing.T) {
+	list := serverListResponse{Servers: []serverOption{
+		{ID: "cn-pending-fast", Kind: "speedtestcn", LatencyMS: 2, LatencyMeasured: true},
+		{ID: "net-20", Kind: "speedtest", LatencyMS: 20},
+		{ID: "cn-ready-10", Kind: "speedtestcn", BandwidthReady: true, LatencyMS: 10, LatencyMeasured: true},
+		{ID: "net-5", Kind: "speedtest", LatencyMS: 5},
+	}}
+	rankServerOptions(&list)
+	want := []string{"net-5", "cn-ready-10", "net-20", "cn-pending-fast"}
+	for i, id := range want {
+		if list.Servers[i].ID != id {
+			t.Fatalf("order=%+v", list.Servers)
+		}
+	}
+}
+
+
+func TestBundledSpeedtestGoCLIResult(t *testing.T) {
+	dir := t.TempDir()
+	bin := dir + "/speedtest-go"
+	script := "#!/bin/sh\ncat <<'EOF'\n{\"servers\":[{\"latency\":12000000,\"jitter\":1000000,\"dl_speed\":12500000,\"ul_speed\":6250000}]}\nEOF\n"
+	if err := os.WriteFile(bin, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FNOS_SPEEDTEST_GO_BIN", bin)
+	target := httpTarget{
+		Protocol: "speedtestcn", Version: "1", CustomURL: "http://node.example:8080/upload.php",
+		Source: httpSource{ID: "http:cn:cli", Name: "苏州", Sponsor: "教育网", Province: "江苏", Carrier: "教育网", Kind: "speedtestcn"},
+		Network: networkIdentity{PublicIP: "1.2.3.4", ISP: "教育网", Carrier: "教育网"},
+	}
+	result, err := runSpeedtestCNCLI(context.Background(), target, profiles["quick"], func(string, int, string) {}, func(liveSample) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.DownloadMbps != 100 || result.UploadMbps != 50 || result.LatencyMS != 12 || result.JitterMS != 1 {
+		t.Fatalf("result=%+v", result)
+	}
 }

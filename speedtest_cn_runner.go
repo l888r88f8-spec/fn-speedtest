@@ -1,21 +1,22 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/showwin/speedtest-go/speedtest"
 )
 
-// runSpeedtestCNHybrid follows the protocol split visible in spiritLHLS/ecs and
-// speedtest.cn's catalog.  Version 1 nodes are classic Speedtest servers and are
-// best handled by showwin/speedtest-go CustomServer. Version 2 nodes expose the
-// newer /hello,/download,/upload API. Whichever generation is primary, the
-// other engine remains available as a fallback because public node metadata is
-// not always accurate.
 func runSpeedtestCNHybrid(ctx context.Context, httpClient *http.Client, target httpTarget, p profile, progress progressFunc, sample sampleFunc) (testResult, error) {
 	type attempt struct {
 		name string
@@ -32,7 +33,6 @@ func runSpeedtestCNHybrid(ctx context.Context, httpClient *http.Client, target h
 	if target.Version == "1" {
 		attempts = []attempt{custom, direct}
 	}
-
 	first, firstErr := attempts[0].run()
 	if firstErr == nil {
 		return first, nil
@@ -40,7 +40,6 @@ func runSpeedtestCNHybrid(ctx context.Context, httpClient *http.Client, target h
 	if err := ctx.Err(); err != nil {
 		return testResult{}, err
 	}
-
 	progress("connecting", 39, "主测速协议不可用，正在自动切换备用协议")
 	second, secondErr := attempts[1].run()
 	if secondErr == nil {
@@ -52,6 +51,113 @@ func runSpeedtestCNHybrid(ctx context.Context, httpClient *http.Client, target h
 	return testResult{}, fmt.Errorf("Speedtest.cn 两种协议均失败：%s：%v；%s：%v", attempts[0].name, firstErr, attempts[1].name, secondErr)
 }
 
+func bundledSpeedtestGoPath() (string, error) {
+	if configured := strings.TrimSpace(os.Getenv("FNOS_SPEEDTEST_GO_BIN")); configured != "" {
+		info, err := os.Stat(configured)
+		if err != nil || !info.Mode().IsRegular() {
+			return "", errors.New("指定的 speedtest-go 不存在")
+		}
+		return configured, nil
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	candidate := filepath.Join(filepath.Dir(executable), "speedtest-go")
+	info, err := os.Stat(candidate)
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&0111 == 0 {
+		return "", errors.New("FPK 内置 speedtest-go 不存在或不可执行")
+	}
+	return candidate, nil
+}
+
+type speedtestGoCLIOutput struct {
+	Servers []struct {
+		Latency time.Duration `json:"latency"`
+		Jitter  time.Duration `json:"jitter"`
+		DLSpeed float64       `json:"dl_speed"`
+		ULSpeed float64       `json:"ul_speed"`
+	} `json:"servers"`
+}
+
+func runSpeedtestCNCLI(ctx context.Context, target httpTarget, p profile, progress progressFunc, sample sampleFunc) (testResult, error) {
+	binary, err := bundledSpeedtestGoPath()
+	if err != nil {
+		return testResult{}, err
+	}
+	args := []string{
+		"--custom-url=" + target.CustomURL,
+		"--json",
+		"--ua=" + speedtestCNBrowserUA,
+		"--thread=" + strconv.Itoa(max(1, p.MaxConnections)),
+	}
+	if p.SavingMode {
+		args = append(args, "--saving-mode")
+	}
+	progress("connecting", 18, "正在调用 FPK 内置 speedtest-go v1.8.3")
+	progress("download", 45, "正在按 ECS 同款协议执行延迟、下载和上传测速")
+	cliCtx, cancel := context.WithTimeout(ctx, 75*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(cliCtx, binary, args...)
+	cmd.Env = append(os.Environ(), "NO_COLOR=1")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	output, runErr := cmd.Output()
+	if cliCtx.Err() != nil {
+		if ctx.Err() != nil {
+			return testResult{}, ctx.Err()
+		}
+		return testResult{}, errors.New("内置 speedtest-go 测速超时")
+	}
+	if runErr != nil {
+		detail := strings.TrimSpace(stderr.String())
+		if len(detail) > 240 {
+			detail = detail[:240]
+		}
+		if detail == "" {
+			return testResult{}, fmt.Errorf("内置 speedtest-go 运行失败：%w", runErr)
+		}
+		return testResult{}, fmt.Errorf("内置 speedtest-go 运行失败：%s", detail)
+	}
+	var payload speedtestGoCLIOutput
+	if err := json.Unmarshal(output, &payload); err != nil || len(payload.Servers) == 0 {
+		return testResult{}, errors.New("内置 speedtest-go 返回结果格式异常")
+	}
+	server := payload.Servers[0]
+	download := server.DLSpeed / 125000.0
+	upload := server.ULSpeed / 125000.0
+	if download <= 0 {
+		return testResult{}, errors.New("内置 speedtest-go 下载未返回有效速度")
+	}
+	if upload <= 0 {
+		return testResult{}, errors.New("内置 speedtest-go 上传未返回有效速度")
+	}
+	latency := float64(server.Latency) / float64(time.Millisecond)
+	jitter := float64(server.Jitter) / float64(time.Millisecond)
+	if sample != nil {
+		dp, up := 100, 100
+		sample(liveSample{DownloadMbps: &download, UploadMbps: &upload, LatencyMS: &latency, DownloadPercent: &dp, UploadPercent: &up})
+	}
+	progress("upload", 90, "内置 speedtest-go 测速完成，正在整理结果")
+	return speedtestCNResult(target, latency, jitter, download, upload), nil
+}
+
+func runSpeedtestCNCustom(ctx context.Context, target httpTarget, p profile, progress progressFunc, sample sampleFunc) (testResult, error) {
+	cliResult, cliErr := runSpeedtestCNCLI(ctx, target, p, progress, sample)
+	if cliErr == nil {
+		return cliResult, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return testResult{}, err
+	}
+	progress("connecting", 24, "内置 CLI 未成功，正在使用 Go 兼容库重试")
+	libraryResult, libraryErr := runSpeedtestCNCustomLibrary(ctx, target, p, progress, sample)
+	if libraryErr == nil {
+		return libraryResult, nil
+	}
+	return testResult{}, fmt.Errorf("内置CLI：%v；兼容库：%v", cliErr, libraryErr)
+}
+
 func newSpeedtestCNCustomClient(p profile) *speedtest.Speedtest {
 	return speedtest.New(speedtest.WithUserConfig(&speedtest.UserConfig{
 		UserAgent:      speedtestCNBrowserUA,
@@ -61,20 +167,14 @@ func newSpeedtestCNCustomClient(p profile) *speedtest.Speedtest {
 	}))
 }
 
-// runSpeedtestCNCustom mirrors the integrated Speedtest.cn path in spiritLHLS/ecs:
-// speedtest-go --custom-url=http://HOST/upload.php.  Using the library directly
-// keeps cancellation and live progress inside fnOS while preserving the same
-// classic latency.txt/random*.jpg/upload.php protocol.
-func runSpeedtestCNCustom(ctx context.Context, target httpTarget, p profile, progress progressFunc, sample sampleFunc) (testResult, error) {
+func runSpeedtestCNCustomLibrary(ctx context.Context, target httpTarget, p profile, progress progressFunc, sample sampleFunc) (testResult, error) {
 	if target.CustomURL == "" {
 		return testResult{}, errors.New("ECS兼容模式缺少节点地址")
 	}
 	client := newSpeedtestCNCustomClient(p)
 	var downloadStarted, uploadStarted time.Time
 	client.SetCallbackDownload(func(rate speedtest.ByteRate) {
-		if sample == nil {
-			return
-		}
+		if sample == nil { return }
 		value := rate.Mbps()
 		if value > 0 {
 			percent := phasePercent(downloadStarted)
@@ -82,9 +182,7 @@ func runSpeedtestCNCustom(ctx context.Context, target httpTarget, p profile, pro
 		}
 	})
 	client.SetCallbackUpload(func(rate speedtest.ByteRate) {
-		if sample == nil {
-			return
-		}
+		if sample == nil { return }
 		value := rate.Mbps()
 		if value > 0 {
 			percent := phasePercent(uploadStarted)
@@ -92,15 +190,12 @@ func runSpeedtestCNCustom(ctx context.Context, target httpTarget, p profile, pro
 		}
 	})
 
-	progress("connecting", 18, "正在使用 ECS 兼容内核连接 Speedtest.cn 节点")
+	progress("connecting", 18, "正在使用 Go 兼容库连接 Speedtest.cn 节点")
 	server, err := client.CustomServer(target.CustomURL)
 	if err != nil {
-		return testResult{}, fmt.Errorf("ECS兼容模式节点初始化失败：%w", err)
+		return testResult{}, fmt.Errorf("兼容库节点初始化失败：%w", err)
 	}
-
-	// Latency is useful but not a hard gate. Some classic servers disable
-	// latency.txt while their random image/upload endpoints still work.
-	progress("latency", 31, "正在检测 ECS 兼容节点延迟")
+	progress("latency", 31, "正在检测兼容节点延迟")
 	latencyCtx, cancelLatency := context.WithTimeout(ctx, 8*time.Second)
 	pingErr := server.PingTestContext(latencyCtx, func(latency time.Duration) {
 		if sample != nil {
@@ -109,84 +204,56 @@ func runSpeedtestCNCustom(ctx context.Context, target httpTarget, p profile, pro
 		}
 	})
 	cancelLatency()
-	if err := ctx.Err(); err != nil {
-		return testResult{}, err
-	}
-	if pingErr != nil {
-		// Keep zero latency and continue, matching the app's tolerant CN path.
-		server.Latency = 0
-		server.Jitter = 0
-	}
+	if err := ctx.Err(); err != nil { return testResult{}, err }
+	if pingErr != nil { server.Latency = 0; server.Jitter = 0 }
 
-	progress("download", 45, "正在使用 speedtest-go 测量下载速度")
+	progress("download", 45, "正在使用 Go 兼容库测量下载速度")
 	downloadPercent := 0
-	if sample != nil {
-		sample(liveSample{DownloadPercent: &downloadPercent})
-	}
+	if sample != nil { sample(liveSample{DownloadPercent: &downloadPercent}) }
 	downloadStarted = time.Now()
 	downloadCtx, cancelDownload := context.WithTimeout(ctx, 45*time.Second)
 	err = server.DownloadTestContext(downloadCtx)
 	cancelDownload()
-	if ctx.Err() != nil {
-		return testResult{}, ctx.Err()
-	}
-	if err != nil {
-		return testResult{}, fmt.Errorf("ECS兼容模式下载失败：%w", err)
-	}
+	if ctx.Err() != nil { return testResult{}, ctx.Err() }
+	if err != nil { return testResult{}, fmt.Errorf("兼容库下载失败：%w", err) }
 	download := server.DLSpeed.Mbps()
-	if download <= 0 {
-		return testResult{}, errors.New("ECS兼容模式下载未返回有效速度")
-	}
+	if download <= 0 { return testResult{}, errors.New("兼容库下载未返回有效速度") }
 	downloadPercent = 100
-	if sample != nil {
-		sample(liveSample{DownloadMbps: &download, DownloadPercent: &downloadPercent})
-	}
+	if sample != nil { sample(liveSample{DownloadMbps: &download, DownloadPercent: &downloadPercent}) }
 
-	progress("upload", 73, "正在使用 speedtest-go 测量上传速度")
+	progress("upload", 73, "正在使用 Go 兼容库测量上传速度")
 	uploadPercent := 0
-	if sample != nil {
-		sample(liveSample{UploadPercent: &uploadPercent})
-	}
+	if sample != nil { sample(liveSample{UploadPercent: &uploadPercent}) }
 	uploadStarted = time.Now()
 	uploadCtx, cancelUpload := context.WithTimeout(ctx, 45*time.Second)
 	err = server.UploadTestContext(uploadCtx)
 	cancelUpload()
-	if ctx.Err() != nil {
-		return testResult{}, ctx.Err()
-	}
-	if err != nil {
-		return testResult{}, fmt.Errorf("ECS兼容模式上传失败：%w", err)
-	}
+	if ctx.Err() != nil { return testResult{}, ctx.Err() }
+	if err != nil { return testResult{}, fmt.Errorf("兼容库上传失败：%w", err) }
 	upload := server.ULSpeed.Mbps()
-	if upload <= 0 {
-		return testResult{}, errors.New("ECS兼容模式上传未返回有效速度")
-	}
+	if upload <= 0 { return testResult{}, errors.New("兼容库上传未返回有效速度") }
 	uploadPercent = 100
-	if sample != nil {
-		sample(liveSample{UploadMbps: &upload, UploadPercent: &uploadPercent})
-	}
+	if sample != nil { sample(liveSample{UploadMbps: &upload, UploadPercent: &uploadPercent}) }
 
+	latency := float64(server.Latency.Microseconds()) / 1000
+	jitter := float64(server.Jitter.Microseconds()) / 1000
+	return speedtestCNResult(target, latency, jitter, download, upload), nil
+}
+
+func speedtestCNResult(target httpTarget, latency, jitter, download, upload float64) testResult {
 	location := target.Source.Name
 	if target.Source.Province != "" {
 		location = target.Source.Province + " · " + location
 	}
 	isp := target.Network.ISP
-	if isp == "" {
-		isp = target.Network.Carrier
-	}
+	if isp == "" { isp = target.Network.Carrier }
 	return testResult{
-		Engine:         "Speedtest.cn",
-		Network:        &target.Network,
-		LatencyMS:      round2(float64(server.Latency.Microseconds()) / 1000),
-		JitterMS:       round2(float64(server.Jitter.Microseconds()) / 1000),
-		DownloadMbps:   round2(download),
-		UploadMbps:     round2(upload),
-		ServerLocation: location,
-		ServerID:       target.Source.ID,
-		ServerSponsor:  target.Source.Sponsor,
-		ServerCountry:  "中国",
-		ISP:            isp,
-		CarrierMatched: target.Network.Carrier != "" && target.Network.Carrier == target.Source.Carrier,
-		PublicIP:       target.Network.PublicIP,
-	}, nil
+		Engine: "Speedtest.cn", Network: &target.Network,
+		LatencyMS: round2(latency), JitterMS: round2(jitter),
+		DownloadMbps: round2(download), UploadMbps: round2(upload),
+		ServerLocation: location, ServerID: target.Source.ID,
+		ServerSponsor: target.Source.Sponsor, ServerCountry: "中国",
+		ISP: isp, CarrierMatched: target.Network.Carrier != "" && target.Network.Carrier == target.Source.Carrier,
+		PublicIP: target.Network.PublicIP,
+	}
 }

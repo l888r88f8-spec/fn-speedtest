@@ -49,6 +49,11 @@ jobs:
           file dist/fnos-speedtest-1.10.8-x86_64.fpk
           sha256sum dist/fnos-speedtest-1.10.8-x86_64.fpk
           tar -tzf dist/fnos-speedtest-1.10.8-x86_64.fpk | sort
+          rm -rf /tmp/fnos-speedtest-inspect && mkdir -p /tmp/fnos-speedtest-inspect
+          tar -xzf dist/fnos-speedtest-1.10.8-x86_64.fpk -C /tmp/fnos-speedtest-inspect
+          tar -xzf /tmp/fnos-speedtest-inspect/app.tgz -C /tmp/fnos-speedtest-inspect
+          test -x /tmp/fnos-speedtest-inspect/bin/speedtest-go
+          /tmp/fnos-speedtest-inspect/bin/speedtest-go --version
 
       - name: Upload FPK artifact
         uses: actions/upload-artifact@v4

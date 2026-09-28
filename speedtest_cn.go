@@ -201,63 +201,11 @@ func fetchSpeedtestCNCatalog(ctx context.Context, client *http.Client, _ network
 	return nil, lastErr
 }
 
-func speedtestCNCandidates(targets []httpTarget, n networkIdentity, limit int) []httpTarget {
+func speedtestCNCandidates(targets []httpTarget, _ networkIdentity, limit int) []httpTarget {
 	if limit <= 0 || limit > len(targets) {
 		limit = len(targets)
 	}
-	sorted := append([]httpTarget(nil), targets...)
-	rank := func(target httpTarget) int {
-		s := target.Source
-		sameProvince := n.CountryCode == "CN" && n.Province != "" && n.Province == s.Province
-		sameCarrier := n.Carrier != "" && n.Carrier == s.Carrier
-		switch {
-		case sameProvince && sameCarrier:
-			return 0
-		case sameCarrier:
-			return 1
-		case sameProvince:
-			return 2
-		case s.Carrier == "教育网":
-			return 3
-		default:
-			return 4
-		}
-	}
-	sort.SliceStable(sorted, func(i, j int) bool {
-		if rank(sorted[i]) != rank(sorted[j]) {
-			return rank(sorted[i]) < rank(sorted[j])
-		}
-		if sorted[i].Source.Province != sorted[j].Source.Province {
-			return sorted[i].Source.Province < sorted[j].Source.Province
-		}
-		return sorted[i].Source.ID < sorted[j].Source.ID
-	})
-	selected := make([]httpTarget, 0, limit)
-	added := map[string]bool{}
-	add := func(target httpTarget) {
-		if len(selected) < limit && !added[target.Source.ID] {
-			added[target.Source.ID] = true
-			selected = append(selected, target)
-		}
-	}
-	for _, target := range sorted {
-		if rank(target) <= 2 {
-			add(target)
-		}
-	}
-	for _, carrier := range []string{"中国电信", "中国联通", "中国移动", "中国广电", "教育网"} {
-		count := 0
-		for _, target := range sorted {
-			if target.Source.Carrier == carrier && count < 3 {
-				add(target)
-				count++
-			}
-		}
-	}
-	for _, target := range sorted {
-		add(target)
-	}
-	return selected
+	return append([]httpTarget(nil), targets[:limit]...)
 }
 
 func speedtestCNClassicDownloadURL(target httpTarget) (string, error) {
@@ -269,6 +217,55 @@ func speedtestCNClassicDownloadURL(target httpTarget) (string, error) {
 	u.RawQuery = ""
 	u.Fragment = ""
 	return u.String(), nil
+}
+
+func speedtestCNClassicLatencyURL(target httpTarget) (string, error) {
+	u, err := url.Parse(target.CustomURL)
+	if err != nil || u.Hostname() == "" {
+		return "", errors.New("invalid classic Speedtest server")
+	}
+	u.Path = "/speedtest/latency.txt"
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String(), nil
+}
+
+func speedtestCNOneShotLatency(ctx context.Context, client *http.Client, address string) (float64, error) {
+	probeCtx, cancel := context.WithTimeout(ctx, 1200*time.Millisecond)
+	defer cancel()
+	req, err := speedtestCNRequest(probeCtx, http.MethodGet, address, nil, 0)
+	if err != nil {
+		return 0, err
+	}
+	started := time.Now()
+	resp, err := speedtestCNLooseResponse(client, req)
+	if err != nil {
+		return 0, err
+	}
+	_, readErr := io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	resp.Body.Close()
+	if readErr != nil {
+		return 0, readErr
+	}
+	return float64(time.Since(started).Microseconds()) / 1000, nil
+}
+
+func speedtestCNDiscoveryLatency(ctx context.Context, client *http.Client, target httpTarget) (float64, error) {
+	classicURL, classicErr := speedtestCNClassicLatencyURL(target)
+	addresses := []string{target.PingURL}
+	if target.Version == "1" && classicErr == nil {
+		addresses = []string{classicURL, target.PingURL}
+	} else if classicErr == nil {
+		addresses = append(addresses, classicURL)
+	}
+	for _, address := range addresses {
+		if value, err := speedtestCNOneShotLatency(ctx, client, address); err == nil && value > 0 {
+			return value, nil
+		}
+	}
+	tcpCtx, cancel := context.WithTimeout(ctx, 1200*time.Millisecond)
+	defer cancel()
+	return speedtestCNTCPLatency(tcpCtx, target)
 }
 
 func speedtestCNFirstByteProbe(ctx context.Context, client *http.Client, address string) error {
@@ -334,17 +331,17 @@ func (m *multiEngine) discoverSpeedtestCN(ctx context.Context, n networkIdentity
 		return out
 	}
 	out.Diagnostic.Candidates = len(targets)
-	// Probe a somewhat wider candidate pool, but keep the UI list compact.
-	// The probe reads only the first byte from the protocol-appropriate download
-	// endpoint and is heavily bounded, so it ranks real bandwidth reachability
-	// without performing a full speed test.
-	targets = speedtestCNCandidates(targets, n, 32)
+	// Probe the complete public catalog. The catalog is intentionally kept whole:
+	// protocol reachability is a display/sort signal, not a filter.
+	targets = speedtestCNCandidates(targets, n, len(targets))
 	out.Diagnostic.Tested = len(targets)
 	type probed struct {
-		index int
-		target httpTarget
-		ready bool
-		err error
+		index           int
+		target          httpTarget
+		ready           bool
+		latency         float64
+		latencyMeasured bool
+		err             error
 	}
 	jobs := make(chan probed, len(targets))
 	results := make(chan probed, len(targets))
@@ -353,13 +350,17 @@ func (m *multiEngine) discoverSpeedtestCN(ctx context.Context, n networkIdentity
 		jobs <- probed{index: i, target: target}
 	}
 	close(jobs)
-	workers := min(16, len(targets))
+	workers := min(20, len(targets))
 	var wg sync.WaitGroup
 	wg.Add(workers)
 	for range workers {
 		go func() {
 			defer wg.Done()
 			for item := range jobs {
+				if latency, latencyErr := speedtestCNDiscoveryLatency(ctx, m.client, item.target); latencyErr == nil && latency > 0 {
+					item.latency = latency
+					item.latencyMeasured = true
+				}
 				item.err = speedtestCNQuickDownloadProbe(ctx, m.client, item.target)
 				item.ready = item.err == nil
 				results <- item
@@ -405,7 +406,8 @@ func (m *multiEngine) discoverSpeedtestCN(ctx context.Context, n networkIdentity
 			ProvinceMatched: n.CountryCode == "CN" && n.Province != "" && n.Province == s.Province,
 			CarrierMatched:  n.Carrier != "" && n.Carrier == s.Carrier,
 			Mainland: true, Kind: "speedtestcn", Engine: "Speedtest.cn",
-			LatencyMeasured: false, BandwidthReady: item.ready,
+			LatencyMS: round2(item.latency), JitterMS: 0,
+			LatencyMeasured: item.latencyMeasured, BandwidthReady: item.ready,
 		})
 	}
 
@@ -417,7 +419,7 @@ func (m *multiEngine) discoverSpeedtestCN(ctx context.Context, n networkIdentity
 	}
 	out.Diagnostic.Status = "available"
 	pending := len(out.Servers) - readyCount
-	out.Diagnostic.Message = fmt.Sprintf("%d 个节点，%d 个测速协议可达，%d 个待验证；延时待实测", len(out.Servers), readyCount, pending)
+	out.Diagnostic.Message = fmt.Sprintf("已加载全部 %d 个节点，%d 个测速协议可达，%d 个待验证", len(out.Servers), readyCount, pending)
 	return out
 }
 

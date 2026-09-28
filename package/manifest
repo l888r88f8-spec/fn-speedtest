@@ -1,7 +1,7 @@
 appname=fnos-speedtest
 version=1.10.8
 display_name=牛速
-desc=为飞牛 NAS 设计的多源公网测速工具。接入 Speedtest.cn，并根据公网 IP、运营商和省份清晰分组、智能匹配节点。
+desc=为飞牛 NAS 设计的多源公网测速工具。整合 Speedtest.cn、Speedtest.net 和公开测速节点，按协议可达性与延时统一排序。
 source=thirdparty
 platform=x86
 maintainer=liurf
@@ -11,4 +11,4 @@ desktop_applaunchname=fnos-speedtest.Application
 ctl_stop=true
 checkport=false
 disable_authorization_path=true
-changelog=参考 spiritLHLS/ecs 重构 Speedtest.cn：ver=1 节点优先使用 showwin/speedtest-go CustomServer（/speedtest/latency.txt、randomNxN.jpg、upload.php），ver=2 节点优先使用 Speedtest.cn 新 HTTP 接口；两种协议失败时自动互相回退，并按实际协议探测节点可达性。
+changelog=显示完整 Speedtest.cn 节点目录并取消运营商/省份分组，协议可达节点优先、其余按延时统一排序；FPK 内置官方 speedtest-go v1.8.3 x86_64，ECS 兼容模式优先调用内置 CLI，失败再回退 Go 库和 Speedtest.cn HTTP。
