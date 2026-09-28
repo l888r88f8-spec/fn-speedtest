@@ -54,6 +54,7 @@ type multiEngine struct {
 	client          *http.Client
 	detect          func(context.Context) (*speedtest.User, networkIdentity)
 	directory       func(context.Context, *http.Client, *speedtest.User, networkIdentity) (serverListResponse, error)
+	supplementalNet  func(context.Context, networkIdentity) []serverOption
 }
 
 func newMultiEngine() *multiEngine {
@@ -62,7 +63,7 @@ func newMultiEngine() *multiEngine {
 	transport.MaxIdleConns = 100
 	transport.MaxIdleConnsPerHost = 16
 	transport.ResponseHeaderTimeout = 5 * time.Second
-	return &multiEngine{globalDirectory: func(ctx context.Context, client *http.Client, n networkIdentity) ([]httpTarget, error) {
+	m := &multiEngine{globalDirectory: func(ctx context.Context, client *http.Client, n networkIdentity) ([]httpTarget, error) {
 		return fetchGlobalTargets(ctx, client, globalCatalogURL, n)
 	}, cnDirectory: fetchSpeedtestCNCatalog, detect: detectNetworkForSources, directory: func(ctx context.Context, client *http.Client, user *speedtest.User, n networkIdentity) (serverListResponse, error) {
 		return discoverForNetwork(ctx, client, "https://www.speedtest.net/api/js/servers", user, n)
@@ -70,6 +71,8 @@ func newMultiEngine() *multiEngine {
 		Transport: transport, Timeout: 8 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse },
 	}}
+	m.supplementalNet = func(ctx context.Context, n networkIdentity) []serverOption { return m.discoverSupplementalNet(ctx, n) }
+	return m
 }
 func sourceEligible(_ httpSource, _ networkIdentity) bool {
 	return true
@@ -122,9 +125,13 @@ func (m *multiEngine) Discover(ctx context.Context) (serverListResponse, error) 
 	}()
 	supplementalNet := make(chan []serverOption, 1)
 	go func() {
+		if m.supplementalNet == nil {
+			supplementalNet <- nil
+			return
+		}
 		cctx, cancel := context.WithTimeout(ctx, 6*time.Second)
 		defer cancel()
-		supplementalNet <- m.discoverSupplementalNet(cctx, n)
+		supplementalNet <- m.supplementalNet(cctx, n)
 	}()
 	options := make(chan serverOption, len(m.sources))
 	var wg sync.WaitGroup
