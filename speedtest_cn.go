@@ -43,6 +43,21 @@ func blockedSpeedtestCNNode(fields ...string) bool {
 	return strings.Contains(text, "浙江大学") || strings.Contains(text, "zju.edu.cn")
 }
 
+func speedtestCNCustomURL(host string) (string, error) {
+	host = strings.TrimSpace(host)
+	if host == "" || strings.ContainsAny(host, "/?#@") {
+		return "", errors.New("invalid custom server host")
+	}
+	u, err := url.Parse("http://" + host + "/upload.php")
+	if err != nil || u.Hostname() == "" || u.User != nil {
+		return "", errors.New("invalid custom server host")
+	}
+	if ip, err := netip.ParseAddr(u.Hostname()); err == nil && (!ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLinkLocalUnicast()) {
+		return "", errors.New("private custom server host")
+	}
+	return u.String(), nil
+}
+
 func catalogURL(value, wantPath string) (string, error) {
 	u, err := url.Parse(strings.TrimSpace(value))
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.Fragment != "" {
@@ -95,6 +110,7 @@ func parseSpeedtestCNCatalog(data []byte) ([]httpTarget, error) {
 			continue
 		}
 		id, host := get(record, "id"), get(record, "host")
+		version := get(record, "ver")
 		province := normalizeProvince(get(record, "province"))
 		city := strings.TrimSuffix(get(record, "city"), "市")
 		operator, sponsor := get(record, "operator"), get(record, "sponsor")
@@ -115,8 +131,12 @@ func parseSpeedtestCNCatalog(data []byte) ([]httpTarget, error) {
 			continue
 		}
 		seen[strings.ToLower(ping.Host)] = true
+		customURL, customErr := speedtestCNCustomURL(host)
+		if customErr != nil {
+			continue
+		}
 		source := httpSource{ID: "http:cn:" + id, Name: city, Sponsor: carrier, Province: province, Carrier: carrier, Kind: "speedtestcn", Page: "https://www.speedtest.cn/"}
-		targets = append(targets, httpTarget{Protocol: "speedtestcn", Source: source, PingURL: pingURL, DownloadURL: downloadURL, UploadURL: uploadURL})
+		targets = append(targets, httpTarget{Protocol: "speedtestcn", Version: version, Source: source, PingURL: pingURL, DownloadURL: downloadURL, UploadURL: uploadURL, CustomURL: customURL})
 	}
 	if len(targets) == 0 {
 		return nil, errors.New("catalog contains no eligible nodes")
