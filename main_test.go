@@ -118,7 +118,7 @@ func TestAPIFlowAndEmbeddedUI(t *testing.T) {
 	}
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "NAS 网络测速") || !strings.Contains(string(body), "downloadProgressBar") || !strings.Contains(string(body), "serverSelect") {
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "NAS 网络测速") || !strings.Contains(string(body), "downloadProgressBar") || !strings.Contains(string(body), "cnServerSelect") || !strings.Contains(string(body), "netServerSelect") {
 		t.Fatalf("embedded UI not served: status=%d", resp.StatusCode)
 	}
 
