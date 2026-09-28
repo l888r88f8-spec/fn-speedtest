@@ -21,8 +21,19 @@ let refreshing = false;
 
 async function api(path, options = {}) {
   const response = await fetch(`api/${path}`, {headers: {'Content-Type': 'application/json'}, ...options});
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) { const error = new Error(data.error || '请求失败'); error.sources = data.sources; throw error; }
+  const raw = await response.text();
+  let data = {};
+  if (raw) {
+    try { data = JSON.parse(raw); }
+    catch {
+      if (!response.ok) {
+        const summary = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+        throw new Error(summary ? `HTTP ${response.status}：${summary}` : `HTTP ${response.status}`);
+      }
+      throw new Error(`服务返回格式异常（HTTP ${response.status}）`);
+    }
+  }
+  if (!response.ok) { const error = new Error(data.error || `HTTP ${response.status}`); error.sources = data.sources; throw error; }
   return data;
 }
 
