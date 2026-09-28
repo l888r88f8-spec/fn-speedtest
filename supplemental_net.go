@@ -55,6 +55,32 @@ func fetchLimited(ctx context.Context, client *http.Client, address string, limi
 	return b,nil
 }
 
+func supplementalProvince(name, sponsor string) string {
+	s := &speedtest.Server{Name:name, Country:"China", CC:"CN", Sponsor:sponsor}
+	if province := nodeProvince(s); province != "" {
+		return province
+	}
+	text := strings.ToLower(name + " " + sponsor)
+	for _, item := range []struct{
+		province string
+		keys []string
+	}{
+		{"江苏", []string{"suzhou","zhenjiang","jiangsu"}},
+		{"福建", []string{"fuzhou","fujian"}},
+		{"浙江", []string{"ningbo","zhejiang"}},
+		{"四川", []string{"chengdu","sichuan"}},
+		{"上海", []string{"shanghai"}},
+		{"北京", []string{"beijing"}},
+	} {
+		for _, key := range item.keys {
+			if strings.Contains(text, key) {
+				return item.province
+			}
+		}
+	}
+	return ""
+}
+
 func parseSpiritNetCatalog(data []byte)([]supplementalNetNode,error){
 	r:=csv.NewReader(strings.NewReader(string(data))); r.FieldsPerRecord=-1
 	header,err:=r.Read(); if err!=nil{return nil,err}
@@ -71,7 +97,7 @@ func parseSpiritNetCatalog(data []byte)([]supplementalNetNode,error){
 		seen[id]=true
 		name:=strings.TrimSuffix(get(row,"city"),"市"); sponsor:=get(row,"supplier")
 		s:=&speedtest.Server{Name:name,Country:"China",CC:"CN",Sponsor:sponsor}
-		out=append(out,supplementalNetNode{ID:id,Name:name,Sponsor:sponsor,Province:nodeProvince(s),Carrier:canonicalCarrier(sponsor),Host:host+":"+port,URL:"http://"+host+":"+port+"/speedtest/upload.php"})
+		out=append(out,supplementalNetNode{ID:id,Name:name,Sponsor:sponsor,Province:supplementalProvince(name,sponsor),Carrier:canonicalCarrier(sponsor),Host:host+":"+port,URL:"http://"+host+":"+port+"/speedtest/upload.php"})
 	}
 	if len(out)==0{return nil,errors.New("empty spirit net catalog")}
 	return out,nil
@@ -96,7 +122,7 @@ func parseSukkaNetCatalog(data []byte)([]supplementalNetNode,error){
 		u,err:=url.Parse(x.URL);if err!=nil||u.Hostname()==""{continue}
 		seen[x.ID]=true
 		s:=&speedtest.Server{Name:x.Name,Country:x.Country,CC:x.CC,Sponsor:x.Sponsor}
-		out=append(out,supplementalNetNode{ID:x.ID,Name:x.Name,Sponsor:x.Sponsor,Province:nodeProvince(s),Carrier:canonicalCarrier(x.Sponsor),Host:x.Host,URL:x.URL})
+		out=append(out,supplementalNetNode{ID:x.ID,Name:x.Name,Sponsor:x.Sponsor,Province:supplementalProvince(x.Name,x.Sponsor),Carrier:canonicalCarrier(x.Sponsor),Host:x.Host,URL:x.URL})
 	}
 	if len(out)==0{return nil,errors.New("empty sukka net catalog")}
 	return out,nil
