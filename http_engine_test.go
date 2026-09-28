@@ -336,19 +336,20 @@ func TestHTTPSourceConfigAndProtection(t *testing.T) {
 		})
 	}
 }
-func TestPublicSourceMatchAndRanking(t *testing.T) {
+func TestPublicSourcesAreUngatedAndRankingUsesLatency(t *testing.T) {
 	source := publicSources[0]
 	for _, n := range []networkIdentity{{CountryCode: "CN", Province: "江苏", Carrier: "中国电信"}, {CountryCode: "CN", Province: "广东", Carrier: "中国联通"}, {}} {
-		if sourceEligible(source, n) {
-			t.Fatal("restricted carrier source included")
+		if !sourceEligible(source, n) {
+			t.Fatal("public source unexpectedly hidden")
 		}
 	}
-	if !sourceEligible(source, networkIdentity{CountryCode: "CN", Province: "广东", Carrier: "中国电信"}) {
-		t.Fatal("matching source excluded")
-	}
-	list := serverListResponse{Servers: []serverOption{{ID: "other", LatencyMS: 10, Recommended: true}, {ID: "same", LatencyMS: 11, ProvinceMatched: true, CarrierMatched: true}, {ID: "slow", LatencyMS: 90, ProvinceMatched: true, CarrierMatched: true}}}
+	list := serverListResponse{Servers: []serverOption{
+		{ID: "other", LatencyMS: 10, Recommended: true},
+		{ID: "same", LatencyMS: 11, ProvinceMatched: true, CarrierMatched: true},
+		{ID: "slow", LatencyMS: 90, ProvinceMatched: true, CarrierMatched: true},
+	}}
 	rankServerOptions(&list)
-	if list.RecommendedID != "same" {
+	if list.RecommendedID != "other" {
 		t.Fatal(list)
 	}
 	for i, s := range list.Servers {
