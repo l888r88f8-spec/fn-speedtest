@@ -32,11 +32,11 @@ class Element {
    {id:'http:cn:2',name:'杭州',province:'浙江',country:'中国',sponsor:'中国电信',carrier:'中国电信',kind:'speedtestcn',engine:'Speedtest.cn',mainland:true,carrierMatched:true,latencyMeasured:true,bandwidthReady:true,latencyMs:10,jitterMs:.4},
    {id:'http:cn:3',name:'苏州',province:'江苏',country:'中国',sponsor:'中国联通',carrier:'中国联通',kind:'speedtestcn',engine:'Speedtest.cn',mainland:true,provinceMatched:true,latencyMeasured:true,bandwidthReady:false,latencyMs:11,jitterMs:.5},
    {id:'http:cn:4',name:'成都',province:'四川',country:'中国',sponsor:'中国移动',carrier:'中国移动',kind:'speedtestcn',engine:'Speedtest.cn',mainland:true,latencyMeasured:true,bandwidthReady:false,latencyMs:16,jitterMs:.6},
-   {id:'cn1',name:'上海',country:'中国',sponsor:'中国联通',mainland:true,latencyMs:8,jitterMs:.3},
-   {id:'cn2',name:'北京',country:'中国',sponsor:'中国电信',mainland:true,latencyMs:16,jitterMs:.6},
+   {id:'cn1',name:'上海',country:'中国',sponsor:'中国联通',kind:'speedtest',engine:'Speedtest.net',mainland:true,latencyMs:8,jitterMs:.3},
+   {id:'cn2',name:'北京',country:'中国',sponsor:'中国电信',kind:'speedtest',engine:'Speedtest.net',mainland:true,latencyMs:16,jitterMs:.6},
    {id:'http:edu',name:'高校',sponsor:'大学',kind:'university',mainland:true,latencyMs:12},
    {id:'http:isp',name:'运营商',sponsor:'电信',kind:'operator',mainland:true,latencyMs:11},
-   {id:'near',name:'Tokyo',country:'Japan',sponsor:'ISP',mainland:false,latencyMs:90,jitterMs:2}
+   {id:'near',name:'Tokyo',country:'Japan',sponsor:'ISP',kind:'speedtest',engine:'Speedtest.net',mainland:false,latencyMs:90,jitterMs:2}
   ]};}
   if(endpoint==='servers' && catalogueMode==='recommended') {data.recommendedId='http:cn:1'; data.servers=data.servers.filter(s=>s.id==='http:cn:1');data.servers[0].recommended=true;data.sources=[{id:'speedtestcn',status:'available'}];}
   if(endpoint==='servers' && ['failed','empty'].includes(catalogueMode)) {
