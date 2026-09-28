@@ -27,3 +27,19 @@ func TestCustomOoklaResultUsesSpeedtestNetEngine(t *testing.T){
 	result:=speedtestCNResult(target,10,1,100,50)
 	if result.Engine!="Speedtest.net"{t.Fatalf("engine=%q",result.Engine)}
 }
+
+
+func TestCanonicalSupplementalHostDeduplicatesOoklaProxy(t *testing.T){
+	direct:=canonicalSupplementalHost("4gsuzhou1.speedtest.jsinfo.net:8080")
+	proxy:=canonicalSupplementalHost("http://4gsuzhou1.speedtest.jsinfo.net.prod.hosts.ooklaserver.net:8080/speedtest/upload.php")
+	if direct==""||direct!=proxy{t.Fatalf("direct=%q proxy=%q",direct,proxy)}
+}
+
+func TestSupplementalNetOptionKeepsUnmeasuredNode(t *testing.T){
+	node:=supplementalNetNode{ID:"5396",Name:"苏州",Sponsor:"江苏电信",Province:"江苏",Carrier:"中国电信"}
+	option:=supplementalNetOption(node,networkIdentity{CountryCode:"CN",Province:"江苏",Carrier:"中国电信"},0,false)
+	if option.ID!="5396"||option.Engine!="Speedtest.net"||option.Kind!="speedtest"||option.LatencyMeasured||option.LatencyMS!=0{
+		t.Fatalf("option=%+v",option)
+	}
+	if !option.ProvinceMatched||!option.CarrierMatched{t.Fatalf("matching=%+v",option)}
+}

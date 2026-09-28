@@ -131,6 +131,28 @@ func fetchSukkaNetCatalog(ctx context.Context, client *http.Client)([]supplement
 	return parseSukkaNetCatalog(b)
 }
 
+func canonicalSupplementalHost(raw string) string {
+	raw=strings.TrimSpace(raw)
+	if raw==""{return ""}
+	candidate:=raw
+	if !strings.Contains(candidate,"://"){candidate="http://"+candidate}
+	u,err:=url.Parse(candidate)
+	if err!=nil{return ""}
+	host:=strings.ToLower(strings.TrimSuffix(u.Hostname(),"."))
+	host=strings.TrimSuffix(host,".prod.hosts.ooklaserver.net")
+	return host
+}
+
+func supplementalNetOption(node supplementalNetNode,n networkIdentity,lat float64,measured bool) serverOption {
+	if !measured{lat=0}
+	return serverOption{
+		ID:node.ID,Name:node.Name,Country:"中国",Sponsor:node.Sponsor,Carrier:node.Carrier,Province:node.Province,
+		ProvinceMatched:n.CountryCode=="CN"&&n.Province!=""&&n.Province==node.Province,
+		CarrierMatched:n.Carrier!=""&&n.Carrier==node.Carrier,
+		LatencyMS:round2(lat),LatencyMeasured:measured,Mainland:true,Kind:"speedtest",Engine:"Speedtest.net",
+	}
+}
+
 func customOoklaTarget(node supplementalNetNode,n networkIdentity)(httpTarget,error){
 	custom,err:=speedtestCNCustomURL(node.Host);if err!=nil{return httpTarget{},err}
 	src:=httpSource{ID:node.ID,Name:node.Name,Sponsor:node.Sponsor,Province:node.Province,Carrier:node.Carrier,Kind:"speedtest",Page:"https://github.com/VPSDance/vkit"}
@@ -156,33 +178,51 @@ func (m *multiEngine) discoverSupplementalNet(ctx context.Context,n networkIdent
 	all:=append([]supplementalNetNode{},vpsDanceOoklaNodes...)
 	for i:=0;i<2;i++{select{case x:=<-ch:all=append(all,x.nodes...);case<-ctx.Done():return nil}}
 
-	// Prefer live external metadata over curated duplicates, dedupe by numeric ID and host.
+	// Prefer live external metadata over curated duplicates. Normalize Ookla proxy
+	// hostnames so a direct host and its .prod.hosts.ooklaserver.net alias do not
+	// appear as two nodes.
 	seenID:=map[string]bool{};seenHost:=map[string]bool{};dedup:=make([]supplementalNetNode,0,len(all))
 	sort.SliceStable(all,func(i,j int)bool{return !all[i].Custom&&all[j].Custom})
 	for _,node:=range all{
-		host:=strings.ToLower(strings.TrimSpace(node.Host))
-		if host==""&&node.URL!=""{if u,e:=url.Parse(node.URL);e==nil{host=strings.ToLower(u.Host)}}
+		host:=canonicalSupplementalHost(node.Host)
+		if host==""&&node.URL!=""{host=canonicalSupplementalHost(node.URL)}
 		if seenID[node.ID]||(host!=""&&seenHost[host]){continue}
-		seenID[node.ID]=true;if host!=""{seenHost[host]=true};dedup=append(dedup,node)
+		seenID[node.ID]=true
+		if host!=""{seenHost[host]=true}
+		dedup=append(dedup,node)
 	}
-	type checked struct{node supplementalNetNode;lat float64;ok bool}
-	jobs:=make(chan supplementalNetNode,len(dedup));results:=make(chan checked,len(dedup))
-	for _,x:=range dedup{jobs<-x};close(jobs)
+	type probeJob struct{index int;node supplementalNetNode}
+	type checked struct{index int;node supplementalNetNode;lat float64;measured bool}
+	jobs:=make(chan probeJob,len(dedup));results:=make(chan checked,len(dedup))
+	for i,x:=range dedup{jobs<-probeJob{index:i,node:x}};close(jobs)
 	workers:=min(24,len(dedup));var wg sync.WaitGroup;wg.Add(workers)
-	for range workers{go func(){defer wg.Done();for node:=range jobs{
-		s,err:=supplementalProbeServer(node);if err!=nil{results<-checked{node:node};continue}
-		pctx,cancel:=context.WithTimeout(ctx,900*time.Millisecond);err=probeServer(pctx,m.client,s);cancel()
+	for range workers{go func(){defer wg.Done();for job:=range jobs{
+		node:=job.node
+		// Custom host nodes must remain runnable even when the advisory latency
+		// probe fails. Cache the target before probing instead of after success.
+		if node.Custom{
+			if target,e:=customOoklaTarget(node,n);e==nil{
+				m.mu.Lock();m.targets[node.ID]=verifiedTarget{target:target,expires:time.Now().Add(30*time.Minute)};m.mu.Unlock()
+			}
+		}
+		s,err:=supplementalProbeServer(node)
+		if err!=nil{results<-checked{index:job.index,node:node};continue}
+		pctx,cancel:=context.WithTimeout(ctx,900*time.Millisecond)
+		err=probeServer(pctx,m.client,s)
+		cancel()
 		if err==nil{
-			if node.Custom{if target,e:=customOoklaTarget(node,n);e==nil{m.mu.Lock();m.targets[node.ID]=verifiedTarget{target:target,expires:time.Now().Add(30*time.Minute)};m.mu.Unlock()}}
-			results<-checked{node:node,lat:float64(s.Latency)/float64(time.Millisecond),ok:true}
-		}else{results<-checked{node:node}}
+			results<-checked{index:job.index,node:node,lat:float64(s.Latency)/float64(time.Millisecond),measured:true}
+		}else{
+			results<-checked{index:job.index,node:node}
+		}
 	}}()}
 	go func(){wg.Wait();close(results)}()
-	out:=[]serverOption{}
-	for x:=range results{
-		if !x.ok{continue}
-		node:=x.node
-		out=append(out,serverOption{ID:node.ID,Name:node.Name,Country:"中国",Sponsor:node.Sponsor,Carrier:node.Carrier,Province:node.Province,ProvinceMatched:n.CountryCode=="CN"&&n.Province!=""&&n.Province==node.Province,CarrierMatched:n.Carrier!=""&&n.Carrier==node.Carrier,LatencyMS:round2(x.lat),LatencyMeasured:true,Mainland:true,Kind:"speedtest",Engine:"Speedtest.net"})
+
+	ordered:=make([]checked,len(dedup))
+	for x:=range results{ordered[x.index]=x}
+	out:=make([]serverOption,0,len(ordered))
+	for _,x:=range ordered{
+		out=append(out,supplementalNetOption(x.node,n,x.lat,x.measured))
 	}
 	return out
 }
