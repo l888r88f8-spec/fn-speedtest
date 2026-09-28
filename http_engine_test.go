@@ -159,6 +159,40 @@ func TestSpeedtestCNUsesActualTransferSize(t *testing.T) {
 	}
 }
 
+func TestSpeedtestCNPartialDownloadStillCounts(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "1048576")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(make([]byte, 64<<10))
+	}))
+	defer server.Close()
+
+	target := httpTarget{Protocol: "speedtestcn", DownloadURL: server.URL}
+	rate, err := measureHTTPPhase(context.Background(), newMultiEngine().client, target, httpPhaseConfig{duration: time.Second, budget: 1 << 20}, nil)
+	if err != nil || rate <= 0 {
+		t.Fatalf("partial transfer should remain measurable: rate=%v err=%v", rate, err)
+	}
+}
+
+func TestSpeedtestCNRequestMatchesCurlShape(t *testing.T) {
+	req, err := speedtestCNRequest(context.Background(), http.MethodGet, "http://example.com/download", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.UserAgent() != speedtestCNBrowserUA {
+		t.Fatalf("ua=%q", req.UserAgent())
+	}
+	if req.Header.Get("Accept") != "*/*" {
+		t.Fatalf("accept=%q", req.Header.Get("Accept"))
+	}
+	if req.Header.Get("Cache-Control") != "" || req.Header.Get("Accept-Encoding") != "" {
+		t.Fatalf("unexpected headers: cache=%q encoding=%q", req.Header.Get("Cache-Control"), req.Header.Get("Accept-Encoding"))
+	}
+	if !req.Close {
+		t.Fatal("Speedtest.cn transfer should use a fresh connection")
+	}
+}
+
 func TestHTTPPhaseCancellation(t *testing.T) {
 	for _, upload := range []bool{false, true} {
 		t.Run(map[bool]string{false: "download", true: "upload"}[upload], func(t *testing.T) {
