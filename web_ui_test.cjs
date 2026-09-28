@@ -74,7 +74,8 @@ class Element {
  assert.equal(elements.cnServerSelect.children[1].value,'http:cn:1');
  assert.equal(elements.cnServerSelect.children[2].value,'http:cn:2');
  assert.equal(elements.netServerSelect.children[0].value,'');
- assert.equal(elements.netServerSelect.children[1].value,'cn1');
+ assert.equal(elements.netServerSelect.children[1].value,'http:net:vkit:nanjing-ct');
+ assert.equal(elements.netServerSelect.children[2].value,'cn1');
  assert.ok(elements.cnServerSelect.children[1].textContent.includes('可用'));
  assert.equal(elements.cnServerSelect.children[1].textContent.includes('★'),false);
  assert.equal(elements.cnServerSelect.children[1].textContent.includes('｜'),false);
